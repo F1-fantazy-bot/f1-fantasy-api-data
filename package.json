@@ -1,0 +1,21 @@
+{
+  "name": "f1-fantasy-api-data",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write ."
+  },
+  "keywords": [],
+  "author": "Doron Kilzi",
+  "license": "ISC",
+  "description": "Fetches F1 Fantasy league data via Playwright and saves to Azure Blob Storage",
+  "dependencies": {
+    "@azure/storage-blob": "^12.27.0",
+    "dotenv": "^16.5.0",
+    "node-telegram-bot-api": "^0.66.0",
+    "playwright": "^1.52.0"
+  }
+}
