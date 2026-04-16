@@ -38,15 +38,13 @@ class TelegramService {
   }
 
   async notifySuccess(data) {
-    const leagueName = data?.league?.leagueName || 'Unknown';
-    const memberCount = data?.league?.memberCount || '?';
-    const driverCount = data?.drivers?.length || 0;
-    const matchday = data?.currentMatchday || '?';
+    const leagueName = data?.leagueName || 'Unknown';
+    const memberCount = data?.memberCount || '?';
+    const teamCount = data?.teams?.length || 0;
 
     const message = `✅ *League data fetched successfully*
 League: ${leagueName} (${memberCount} members)
-Matchday: ${matchday}
-Drivers: ${driverCount}
+Teams fetched: ${teamCount}
 Fetched at: ${data?.fetchedAt || new Date().toISOString()}`;
 
     await this.sendMessage(message, LOG_CHANNEL_ID);
