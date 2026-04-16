@@ -37,15 +37,16 @@ class TelegramService {
     }
   }
 
-  async notifySuccess(data) {
-    const leagueName = data?.leagueName || 'Unknown';
-    const memberCount = data?.memberCount || '?';
-    const teamCount = data?.teams?.length || 0;
+  async notifySuccess(allLeagues) {
+    const leagues = Array.isArray(allLeagues) ? allLeagues : [allLeagues];
+    const leagueLines = leagues.map((l) =>
+      `• ${l.leagueName} (${l.teams.length} teams)`
+    ).join('\n');
 
     const message = `✅ *League data fetched successfully*
-League: ${leagueName} (${memberCount} members)
-Teams fetched: ${teamCount}
-Fetched at: ${data?.fetchedAt || new Date().toISOString()}`;
+Leagues: ${leagues.length}
+${leagueLines}
+Fetched at: ${new Date().toISOString()}`;
 
     await this.sendMessage(message, LOG_CHANNEL_ID);
   }
