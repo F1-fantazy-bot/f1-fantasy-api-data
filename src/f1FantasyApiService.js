@@ -198,15 +198,27 @@ async function _apiPost(path, body) {
 
 /** Unwrap the standard F1 API response envelope { Data: { Value: ... } } */
 function _unwrap(json) {
-  if (json?.Data?.Value !== undefined && json?.Data?.Value !== null) {
-    return json.Data.Value;
-  }
-
-  if (json?.Meta?.Success === false) {
-    throw new Error(`API error: ${json.Meta.Message || `RetVal ${json.Meta.RetVal}`}`);
-  }
 
   return json?.Data?.Value ?? json;
+}
+
+/** GET that returns raw JSON without unwrapping (for /feeds/ endpoints that don't use Data.Value) */
+async function _apiGetRaw(path) {
+  _ensureReady();
+  const url = path.startsWith('http') ? path : `${BASE_URL}${path}`;
+
+  const result = await page.evaluate(async (fetchUrl) => {
+    const res = await fetch(fetchUrl, { credentials: 'include' });
+    const text = await res.text();
+
+    return { status: res.status, ok: res.ok, body: text };
+  }, url);
+
+  if (!result.ok) {
+    throw new Error(`GET ${path} → HTTP ${result.status}: ${result.body.substring(0, 200)}`);
+  }
+
+  return JSON.parse(result.body);
 }
 
 function _ensureReady() {
@@ -281,6 +293,13 @@ async function getDrivers(matchdayId) {
   return _apiGet(`/feeds/drivers/${matchdayId}_en.json`);
 }
 
+/** Get private league leaderboard (all members with rank + points) */
+async function getLeagueLeaderboard(leagueId, teamNo = 1) {
+  const json = await _apiGetRaw(`/feeds/leaderboard/privateleague/list_${teamNo}_${leagueId}_0_1.json`);
+
+  return json?.Value?.leaderboard || [];
+}
+
 /** Get web config (tourId, current matchday, etc.) */
 async function getWebConfig() {
   return _apiGet('/feeds/v2/apps/web_config.json');
@@ -297,6 +316,7 @@ module.exports = {
   getSession,
   getLeagues,
   getLeagueInfo,
+  getLeagueLeaderboard,
   getUserGameDays,
   getUserTeam,
   getUserRank,

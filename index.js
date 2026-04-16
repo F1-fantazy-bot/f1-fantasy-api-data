@@ -10,7 +10,7 @@ const f1Api = require('./src/f1FantasyApiService');
     const data = await fetchLeagueData();
     console.log('\nFetched data summary:', JSON.stringify(data, null, 2).substring(0, 500));
 
-    if (!data || !data.league || !data.allLeagues) {
+    if (!data || !data.teams || data.teams.length === 0) {
       throw new Error('Invalid or missing data structure');
     }
 
