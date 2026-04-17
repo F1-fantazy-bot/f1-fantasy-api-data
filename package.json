@@ -6,7 +6,9 @@
     "start": "node index.js",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "deploy": "npm run deploy:aci",
+    "deploy:aci": "az deployment group create --resource-group f1-fantazy-bot --template-file infra/aci/azuredeploy.json --parameters @infra/aci/azuredeploy.parameters.json"
   },
   "keywords": [],
   "author": "Doron Kilzi",

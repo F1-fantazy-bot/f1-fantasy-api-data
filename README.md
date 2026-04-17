@@ -36,10 +36,7 @@ npm start
 Deployed as an Azure Container Instance via ARM template:
 
 ```bash
-az deployment group create \
-  --resource-group f1-fantazy-bot \
-  --template-file infra/aci/azuredeploy.json \
-  --parameters @infra/aci/azuredeploy.parameters.json
+npm run deploy
 ```
 
 ## API Documentation
