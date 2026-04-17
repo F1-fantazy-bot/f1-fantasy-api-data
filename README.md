@@ -33,11 +33,58 @@ npm start
 
 ## Deployment
 
-Deployed as an Azure Container Instance via ARM template:
+### Deploy the ACI workload
+
+Deploy the one-shot container group:
 
 ```bash
-npm run deploy
+npm run deploy:aci
 ```
+
+### Deploy the runner Logic App
+
+Deploy the HTTP-triggered Logic App that starts the ACI:
+
+```bash
+npm run deploy:runner
+```
+
+After deployment, assign the runner Logic App managed identity `Contributor` on the ACI scope:
+
+```bash
+az role assignment create \
+  --assignee <logicAppPrincipalId> \
+  --role Contributor \
+  --scope /subscriptions/<subscriptionId>/resourceGroups/<resourceGroup>/providers/Microsoft.ContainerInstance/containerGroups/<containerGroupName>
+```
+
+The `logicAppPrincipalId` value is emitted by the runner ARM deployment outputs.
+
+### Deploy the weekly scheduler Logic App
+
+Deploy the Monday scheduler after the runner exists:
+
+```bash
+npm run deploy:scheduler
+```
+
+Or deploy both Logic Apps in order:
+
+```bash
+npm run deploy:logicapps
+```
+
+The scheduler runs every Monday at `00:00 UTC` and invokes the runner Logic App callback URL.
+
+### Manually trigger the runner
+
+The runner ARM deployment outputs `runnerTriggerCallbackUrl`. You can invoke it directly:
+
+```bash
+curl -X POST "<runnerTriggerCallbackUrl>"
+```
+
+This always submits a `start` request to the configured ACI container group.
 
 ## API Documentation
 

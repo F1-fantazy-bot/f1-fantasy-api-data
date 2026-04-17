@@ -1,0 +1,21 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "logicAppName": {
+      "value": "f1-fantasy-api-data-runner"
+    },
+    "location": {
+      "value": "westeurope"
+    },
+    "subscriptionId": {
+      "value": "5cfc4033-d828-4bdb-b9ea-de042e483715"
+    },
+    "aciResourceGroup": {
+      "value": "f1-fantazy-bot"
+    },
+    "containerGroupName": {
+      "value": "f1-fantasy-api-data-aci"
+    }
+  }
+}
