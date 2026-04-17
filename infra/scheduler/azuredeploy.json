@@ -1,0 +1,79 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "logicAppName": {
+      "type": "string",
+      "defaultValue": "f1-fantasy-api-data-scheduler",
+      "metadata": {
+        "description": "Name of the scheduler Logic App resource."
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Azure region for the Logic App."
+      }
+    },
+    "runnerLogicAppName": {
+      "type": "string",
+      "defaultValue": "f1-fantasy-api-data-runner",
+      "metadata": {
+        "description": "Name of the runner Logic App to invoke."
+      }
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Logic/workflows",
+      "apiVersion": "2019-05-01",
+      "name": "[parameters('logicAppName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "state": "Enabled",
+        "definition": {
+          "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+          "contentVersion": "1.0.0.0",
+          "triggers": {
+            "Every_Monday": {
+              "type": "Recurrence",
+              "recurrence": {
+                "frequency": "Week",
+                "interval": 1,
+                "schedule": {
+                  "weekDays": [
+                    "Monday"
+                  ],
+                  "hours": [
+                    0
+                  ],
+                  "minutes": [
+                    0
+                  ]
+                },
+                "timeZone": "UTC"
+              }
+            }
+          },
+          "actions": {
+            "Trigger_Runner": {
+              "type": "Http",
+              "inputs": {
+                "method": "POST",
+                "uri": "[listCallbackUrl(resourceId('Microsoft.Logic/workflows/triggers', parameters('runnerLogicAppName'), 'manual'), '2016-06-01').value]"
+              },
+              "runAfter": {}
+            }
+          }
+        }
+      }
+    }
+  ],
+  "outputs": {
+    "logicAppResourceId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.Logic/workflows', parameters('logicAppName'))]"
+    }
+  }
+}
