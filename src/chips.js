@@ -2,15 +2,19 @@
  * Chip extraction helpers.
  *
  * The F1 Fantasy `getOpponentGameDays` response exposes chip usage as top-level
- * boolean/numeric flag pairs on the opponent's team summary. For each chip there is:
+ * flag pairs on the opponent's team summary. For most chips there is:
  *   - `is<Name>taken` — 1 if the chip has been used, 0 otherwise
  *   - `<name>takengd` — the game-day id (gdid) when it was used, 0 if unused
  *
  * Note: the "gd" value is a **gameDayId**, not a matchdayId. A matchday may
  * contain multiple game days (FP / Qualifying / Race / Sprint).
  *
- * The API has an inconsistency for the Autopilot chip where the "taken game-day"
- * field is `isAutopilottakengd` (still prefixed with `is`), unlike the others.
+ * Two quirks worth remembering:
+ *   1. The Autopilot chip's "taken game-day" field is `isAutopilottakengd`
+ *      (still prefixed with `is`), unlike the others.
+ *   2. The Extra DRS chip stores the **gameDayId** in its `isExtradrstaken`
+ *      flag instead of a 0/1 boolean (so the flag can be e.g. `6`). We treat
+ *      any non-zero numeric value as "taken" so this case is covered.
  */
 
 const CHIPS = [
@@ -23,7 +27,12 @@ const CHIPS = [
 ];
 
 function _isTaken(value) {
-  return value === 1 || value === '1' || value === true;
+  if (value === true) return true;
+  if (value === false || value === null || value === undefined || value === '') return false;
+
+  const n = Number(value);
+
+  return Number.isFinite(n) && n > 0;
 }
 
 function _toGameDayId(value) {

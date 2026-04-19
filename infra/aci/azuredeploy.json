@@ -75,7 +75,7 @@
       "type": "string",
       "defaultValue": "f1-fantasy-scraper-json",
       "metadata": {
-        "description": "Blob container name where f1-fantasy-api-data.json will be uploaded."
+        "description": "Blob container name where league data will be uploaded."
       }
     },
     "telegramBotToken": {

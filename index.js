@@ -14,17 +14,28 @@ const f1Api = require('./src/f1FantasyApiService');
     }
 
     console.log(`\nFetched ${allLeagues.length} leagues:`);
-    allLeagues.forEach((l) => console.log(`  - ${l.leagueName} (${l.leagueCode}): ${l.teams.length} teams`));
+    allLeagues.forEach(({ league }) =>
+      console.log(
+        `  - ${league.leagueName} (${league.leagueCode}): ${league.teams.length} teams`,
+      ),
+    );
 
     if (process.env.AZURE_STORAGE_CONNECTION_STRING) {
-      for (const league of allLeagues) {
+      for (const { league, teamsData } of allLeagues) {
         await uploadDataToAzureStorage(league, league.leagueCode);
+        await uploadDataToAzureStorage(
+          teamsData,
+          league.leagueCode,
+          'teams-data.json',
+        );
       }
     } else {
-      console.log('\n⚠️  AZURE_STORAGE_CONNECTION_STRING not set — skipping blob upload');
+      console.log(
+        '\n⚠️  AZURE_STORAGE_CONNECTION_STRING not set — skipping blob upload',
+      );
     }
 
-    await telegramService.notifySuccess(allLeagues);
+    await telegramService.notifySuccess(allLeagues.map(({ league }) => league));
   } catch (error) {
     const errorMessage = error.stack || error.message;
     console.error('Error:', errorMessage);
@@ -32,7 +43,10 @@ const f1Api = require('./src/f1FantasyApiService');
     try {
       await telegramService.notifyError(error);
     } catch (telegramError) {
-      console.error('Failed to send error notification:', telegramError.message);
+      console.error(
+        'Failed to send error notification:',
+        telegramError.message,
+      );
     }
 
     process.exit(1);

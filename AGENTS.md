@@ -32,16 +32,41 @@ Entry point `index.js` wires four single-responsibility modules in `src/`:
 2. `fetchLeagueData.js` — orchestration layer. Calls `getLeagues()`, filters to
    `league_type === 'Private'`, then for each league pulls info → leaderboard →
    per-team per-matchday scores via `getOpponentGameDays`. For each team it also
-   extracts chip usage via `src/chips.js` (`extractChipsUsed`). Returns an array
-   of league objects `{ fetchedAt, leagueName, leagueCode, leagueId, memberCount,
-   teams }`, where each team has `{ teamName, userName, position, totalScore,
-   raceScores, chipsUsed: [{ name, gameDayId }] }`. Chip usage comes from
-   top-level `is<Name>taken` / `<name>takengd` flags on the opponent game-days
-   response — see `src/chips.js`.
-3. `azureBlobStorageService.js` — uploads each league to
-   `leagues/<leagueCode>/f1-fantasy-api-data.json` in the configured container.
-   Skipped entirely when `AZURE_STORAGE_CONNECTION_STRING` is unset (useful for local
-   dry runs).
+   extracts chip usage via `src/chips.js` (`extractChipsUsed`), budget and
+   transfers via `getOpponentTeam`, and resolves the team's drivers and
+   constructors via `src/rosterService.js`. Returns an array of
+   `{ league, teamsData }` tuples per league.
+   - `league`: `{ fetchedAt, leagueName, leagueCode, leagueId, memberCount,
+teams }`, where each team has `{ teamName, userName, position,
+totalScore, raceScores, chipsUsed: [{ name, gameDayId }] }`.
+     Budget and transfers live only in the `teamsData` blob.
+   - `teamsData`: `{ fetchedAt, leagueName, leagueCode, leagueId,
+  matchdayId, teams }` where each team has `{ teamName, userName,
+  position, budget, transfersRemaining, drivers: [...],
+  constructors: [...] }` with each roster entry shaped
+     `{ id, name, price, isCaptain, isMegaCaptain, isFinal }`.
+     `matchdayId` is the **upcoming** matchday (= last-completed + 1,
+     with graceful fallback to the last-completed matchday when no
+     upcoming data is returned, e.g. at end of season). Reading the
+     upcoming matchday rather than the last completed one matters
+     because driver/constructor prices change every week, transfers
+     accrue for the next race, and teams that played the Limitless
+     chip automatically revert to their pre-chip squad after the race.
+     Chip usage comes from top-level `is<Name>taken` / `<name>takengd` flags on
+     the opponent game-days response (see `src/chips.js`). Budget is the single
+     number `userTeam[0].team_info.teamVal` from `getOpponentTeam`
+     (see `src/budget.js`) — already equal to cost-cap-remaining plus
+     sum of driver and constructor costs. `transfersRemaining`
+     is `userTeam[0].usersubsleft` from the same response. Driver/constructor
+     names and prices come from `/feeds/drivers/{mdid}_en.json` (a single feed
+     containing both — `PositionName` of `"DRIVER"` or `"CONSTRUCTOR"` tells
+     them apart) resolved through `src/rosterService.js`, which memoizes the
+     fetch per matchday.
+3. `azureBlobStorageService.js` — uploads to
+   `leagues/<leagueCode>/<blobName>` in the configured container. `blobName`
+   defaults to `league-standings.json`; `index.js` also uploads
+   `teams-data.json` per league. Skipped entirely when
+   `AZURE_STORAGE_CONNECTION_STRING` is unset (useful for local dry runs).
 4. `telegramService.js` — singleton instance (`module.exports = new TelegramService()`).
    Sends success to `LOG_CHANNEL_ID`, errors to **both** log and errors channels.
    Messages to those channels are auto-prefixed with `F1_FANTASY_API: `. No-ops with a

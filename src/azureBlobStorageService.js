@@ -1,8 +1,8 @@
 const { BlobServiceClient } = require('@azure/storage-blob');
 
-const BLOB_NAME = 'f1-fantasy-api-data.json';
+const DEFAULT_BLOB_NAME = 'league-standings.json';
 
-async function uploadDataToAzureStorage(data, leagueCode) {
+async function uploadDataToAzureStorage(data, leagueCode, blobName = DEFAULT_BLOB_NAME) {
   if (!data) {
     throw new Error('No data provided for upload');
   }
@@ -16,7 +16,7 @@ async function uploadDataToAzureStorage(data, leagueCode) {
 
   const blobServiceClient = BlobServiceClient.fromConnectionString(connectionString);
   const containerClient = blobServiceClient.getContainerClient(containerName);
-  const blobPath = leagueCode ? `leagues/${leagueCode}/${BLOB_NAME}` : BLOB_NAME;
+  const blobPath = leagueCode ? `leagues/${leagueCode}/${blobName}` : blobName;
   const blockBlobClient = containerClient.getBlockBlobClient(blobPath);
 
   const jsonData = JSON.stringify(data, null, 2);
