@@ -4,6 +4,7 @@
  */
 const f1Api = require('./f1FantasyApiService');
 const { extractChipsUsed } = require('./chips');
+const { extractBudget } = require('./budget');
 
 async function fetchAllLeaguesData() {
   console.log('1. Logging in to F1 Fantasy...');
@@ -53,16 +54,23 @@ async function fetchSingleLeague(leagueCode) {
     const teamName = decodeURIComponent(entry.team_name);
     const position = entry.cur_rank;
     const totalScore = entry.cur_points;
+    const teamNo = entry.team_no || 1;
     let raceScores = {};
     let chipsUsed = [];
+    let budget = null;
+    let currentMatchdayId = null;
 
     try {
-      const oppData = await f1Api.getOpponentGameDays(entry.user_guid, entry.team_no || 1);
+      const oppData = await f1Api.getOpponentGameDays(entry.user_guid, teamNo);
       const mdDetails = oppData?.mdDetails || {};
 
       for (const [matchdayId, details] of Object.entries(mdDetails)) {
         raceScores[`matchday_${matchdayId}`] = details.pts;
       }
+
+      const mdIds = Object.keys(mdDetails).map(Number).filter(Number.isFinite);
+
+      if (mdIds.length) currentMatchdayId = Math.max(...mdIds);
 
       try {
         chipsUsed = extractChipsUsed(oppData);
@@ -73,6 +81,16 @@ async function fetchSingleLeague(leagueCode) {
       console.log(`   ⚠️ Could not fetch race scores for ${teamName}: ${err.message}`);
     }
 
+    if (currentMatchdayId) {
+      try {
+        const teamData = await f1Api.getOpponentTeam(entry.user_guid, currentMatchdayId, { teamNo });
+
+        budget = extractBudget(teamData);
+      } catch (err) {
+        console.log(`   ⚠️ Could not fetch budget for ${teamName}: ${err.message}`);
+      }
+    }
+
     teams.push({
       teamName,
       userName: entry.user_name,
@@ -80,11 +98,13 @@ async function fetchSingleLeague(leagueCode) {
       totalScore,
       raceScores,
       chipsUsed,
+      budget,
     });
 
     const chipSummary = chipsUsed.length ? ` [chips: ${chipsUsed.map((c) => c.name).join(', ')}]` : '';
+    const budgetSummary = budget !== null ? ` [budget: ${budget}]` : '';
 
-    console.log(`   ${position}. ${teamName} — ${totalScore} pts${chipSummary}`);
+    console.log(`   ${position}. ${teamName} — ${totalScore} pts${budgetSummary}${chipSummary}`);
   }
 
   return {

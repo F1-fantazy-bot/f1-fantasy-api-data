@@ -49,7 +49,8 @@ Each blob at `leagues/<leagueCode>/f1-fantasy-api-data.json` looks like:
       "position": 1,
       "totalScore": 500,
       "raceScores": { "matchday_1": 50, "matchday_2": 60 },
-      "chipsUsed": [{ "name": "Limitless", "gameDayId": 3 }]
+      "chipsUsed": [{ "name": "Limitless", "gameDayId": 3 }],
+      "budget": 105.8
     }
   ]
 }
