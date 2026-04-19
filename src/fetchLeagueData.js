@@ -184,7 +184,7 @@ async function fetchSingleLeague(leagueCode) {
         budget = extractBudget(fetched.teamData);
 
         const teamEntry = Array.isArray(fetched.teamData?.userTeam) ? fetched.teamData.userTeam[0] : null;
-        const subsLeft = teamEntry?.usersubsleft ?? teamEntry?.team_info?.userSubsleft;
+        const subsLeft = teamEntry?.team_info?.userSubsleft ?? teamEntry?.usersubsleft;
 
         if (typeof subsLeft === 'number' && Number.isFinite(subsLeft)) {
           transfersRemaining = subsLeft;
