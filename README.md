@@ -6,7 +6,7 @@ fetches league leaderboard data through the API, and uploads it to Azure Blob St
 ## How It Works
 
 1. **Login** — Launches a headless Chromium browser via Playwright, navigates to the F1 account login page, and authenticates (required to bypass Distil bot detection).
-2. **Fetch Data** — After login, calls the F1 Fantasy API endpoints using `page.evaluate(fetch(...))` to get league standings, team data, and player info.
+2. **Fetch Data** — After login, calls the F1 Fantasy API endpoints using `page.evaluate(fetch(...))` to get league standings, team data, per-race scores, and the chips each team has used.
 3. **Upload** — Saves the JSON data to Azure Blob Storage as `f1-fantasy-api-data.json`.
 4. **Notify** — Sends a Telegram notification on success or failure, then exits.
 
@@ -22,14 +22,38 @@ npm start
 
 ## Environment Variables
 
-| Variable | Description |
-|----------|-------------|
-| `F1_FANTASY_EMAIL` | F1 Fantasy account email |
-| `F1_FANTASY_PASSWORD` | F1 Fantasy account password |
-| `F1_LEAGUE_CODE` | Target league code (default: `C7UYMMWIO07`) |
-| `AZURE_STORAGE_CONNECTION_STRING` | Azure Blob Storage connection string |
-| `AZURE_STORAGE_CONTAINER_NAME` | Blob container name |
-| `TELEGRAM_BOT_TOKEN` | Telegram bot token for notifications |
+| Variable                          | Description                                 |
+| --------------------------------- | ------------------------------------------- |
+| `F1_FANTASY_EMAIL`                | F1 Fantasy account email                    |
+| `F1_FANTASY_PASSWORD`             | F1 Fantasy account password                 |
+| `F1_LEAGUE_CODE`                  | Target league code (default: `C7UYMMWIO07`) |
+| `AZURE_STORAGE_CONNECTION_STRING` | Azure Blob Storage connection string        |
+| `AZURE_STORAGE_CONTAINER_NAME`    | Blob container name                         |
+| `TELEGRAM_BOT_TOKEN`              | Telegram bot token for notifications        |
+
+## League JSON shape
+
+Each blob at `leagues/<leagueCode>/f1-fantasy-api-data.json` looks like:
+
+```json
+{
+  "fetchedAt": "2025-04-19T09:00:00.000Z",
+  "leagueName": "My League",
+  "leagueCode": "ABC123",
+  "leagueId": 123,
+  "memberCount": 10,
+  "teams": [
+    {
+      "teamName": "Team A",
+      "userName": "user_a",
+      "position": 1,
+      "totalScore": 500,
+      "raceScores": { "matchday_1": 50, "matchday_2": 60 },
+      "chipsUsed": [{ "name": "Limitless", "gameDayId": 3 }]
+    }
+  ]
+}
+```
 
 ## Deployment
 

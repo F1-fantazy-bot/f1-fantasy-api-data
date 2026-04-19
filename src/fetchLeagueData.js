@@ -3,6 +3,7 @@
  * Returns an array of league data objects, one per league.
  */
 const f1Api = require('./f1FantasyApiService');
+const { extractChipsUsed } = require('./chips');
 
 async function fetchAllLeaguesData() {
   console.log('1. Logging in to F1 Fantasy...');
@@ -53,6 +54,7 @@ async function fetchSingleLeague(leagueCode) {
     const position = entry.cur_rank;
     const totalScore = entry.cur_points;
     let raceScores = {};
+    let chipsUsed = [];
 
     try {
       const oppData = await f1Api.getOpponentGameDays(entry.user_guid, entry.team_no || 1);
@@ -60,6 +62,12 @@ async function fetchSingleLeague(leagueCode) {
 
       for (const [matchdayId, details] of Object.entries(mdDetails)) {
         raceScores[`matchday_${matchdayId}`] = details.pts;
+      }
+
+      try {
+        chipsUsed = extractChipsUsed(oppData);
+      } catch (err) {
+        console.log(`   ⚠️ Could not extract chips for ${teamName}: ${err.message}`);
       }
     } catch (err) {
       console.log(`   ⚠️ Could not fetch race scores for ${teamName}: ${err.message}`);
@@ -71,9 +79,12 @@ async function fetchSingleLeague(leagueCode) {
       position,
       totalScore,
       raceScores,
+      chipsUsed,
     });
 
-    console.log(`   ${position}. ${teamName} — ${totalScore} pts`);
+    const chipSummary = chipsUsed.length ? ` [chips: ${chipsUsed.map((c) => c.name).join(', ')}]` : '';
+
+    console.log(`   ${position}. ${teamName} — ${totalScore} pts${chipSummary}`);
   }
 
   return {
