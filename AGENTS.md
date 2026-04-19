@@ -45,11 +45,18 @@ totalScore, raceScores, chipsUsed: [{ name, gameDayId }] }`.
   position, budget, transfersRemaining, drivers: [...],
   constructors: [...] }` with each roster entry shaped
      `{ id, name, price, isCaptain, isMegaCaptain, isFinal }`.
+     `matchdayId` is the **upcoming** matchday (= last-completed + 1,
+     with graceful fallback to the last-completed matchday when no
+     upcoming data is returned, e.g. at end of season). Reading the
+     upcoming matchday rather than the last completed one matters
+     because driver/constructor prices change every week, transfers
+     accrue for the next race, and teams that played the Limitless
+     chip automatically revert to their pre-chip squad after the race.
      Chip usage comes from top-level `is<Name>taken` / `<name>takengd` flags on
      the opponent game-days response (see `src/chips.js`). Budget is the single
-     number `userTeam[0].team_info.teamVal` from `getOpponentTeam` for the
-     current matchday (see `src/budget.js`) — already equal to cost-cap-
-     remaining plus sum of driver and constructor costs. `transfersRemaining`
+     number `userTeam[0].team_info.teamVal` from `getOpponentTeam`
+     (see `src/budget.js`) — already equal to cost-cap-remaining plus
+     sum of driver and constructor costs. `transfersRemaining`
      is `userTeam[0].usersubsleft` from the same response. Driver/constructor
      names and prices come from `/feeds/drivers/{mdid}_en.json` (a single feed
      containing both — `PositionName` of `"DRIVER"` or `"CONSTRUCTOR"` tells

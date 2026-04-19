@@ -39,6 +39,44 @@ async function fetchAllLeaguesData() {
   return results;
 }
 
+function _isValidTeamState(teamData) {
+  const entry = Array.isArray(teamData?.userTeam) ? teamData.userTeam[0] : null;
+
+  if (!entry) return false;
+
+  const teamVal = entry.team_info?.teamVal;
+  const hasTeamVal = typeof teamVal === 'number' && Number.isFinite(teamVal);
+  const hasRoster = Array.isArray(entry.playerid) && entry.playerid.length > 0;
+
+  return hasTeamVal && hasRoster;
+}
+
+async function _fetchTeamStateWithFallback(guid, teamNo, preferredMdid, fallbackMdid, teamName) {
+  try {
+    const teamData = await f1Api.getOpponentTeam(guid, preferredMdid, { teamNo });
+
+    if (_isValidTeamState(teamData)) {
+      return { teamData, matchdayId: preferredMdid };
+    }
+  } catch (err) {
+    console.log(`   ⚠️ Upcoming matchday (${preferredMdid}) fetch failed for ${teamName}: ${err.message}`);
+  }
+
+  try {
+    const teamData = await f1Api.getOpponentTeam(guid, fallbackMdid, { teamNo });
+
+    if (_isValidTeamState(teamData)) {
+      console.log(`   ⚠️ Using completed matchday ${fallbackMdid} for ${teamName} (upcoming unavailable)`);
+
+      return { teamData, matchdayId: fallbackMdid };
+    }
+  } catch (err) {
+    console.log(`   ⚠️ Could not fetch team data for ${teamName}: ${err.message}`);
+  }
+
+  return null;
+}
+
 function _extractRosterItems(teamData, rosterMap) {
   const teamEntry = Array.isArray(teamData?.userTeam) ? teamData.userTeam[0] : null;
   const playerIds = Array.isArray(teamEntry?.playerid) ? teamEntry.playerid : [];
@@ -98,7 +136,8 @@ async function fetchSingleLeague(leagueCode) {
     let chipsUsed = [];
     let budget = null;
     let transfersRemaining = null;
-    let currentMatchdayId = null;
+    let lastCompletedMatchdayId = null;
+    let teamStateMatchdayId = null;
     let drivers = [];
     let constructors = [];
 
@@ -112,7 +151,7 @@ async function fetchSingleLeague(leagueCode) {
 
       const mdIds = Object.keys(mdDetails).map(Number).filter(Number.isFinite);
 
-      if (mdIds.length) currentMatchdayId = Math.max(...mdIds);
+      if (mdIds.length) lastCompletedMatchdayId = Math.max(...mdIds);
 
       try {
         chipsUsed = extractChipsUsed(oppData);
@@ -123,15 +162,28 @@ async function fetchSingleLeague(leagueCode) {
       console.log(`   ⚠️ Could not fetch race scores for ${teamName}: ${err.message}`);
     }
 
-    if (currentMatchdayId) {
-      if (!leagueMatchdayId) leagueMatchdayId = currentMatchdayId;
+    if (lastCompletedMatchdayId) {
+      // Prefer the upcoming matchday: driver/constructor prices update weekly,
+      // transfer counts accrue for the next race, and if the team played
+      // Limitless in the last race the roster has reverted to the real squad.
+      // Fall back to the last completed matchday if the upcoming call returns
+      // no data (e.g. end of season).
+      const fetched = await _fetchTeamStateWithFallback(
+        entry.user_guid,
+        teamNo,
+        lastCompletedMatchdayId + 1,
+        lastCompletedMatchdayId,
+        teamName,
+      );
 
-      try {
-        const teamData = await f1Api.getOpponentTeam(entry.user_guid, currentMatchdayId, { teamNo });
+      if (fetched) {
+        teamStateMatchdayId = fetched.matchdayId;
 
-        budget = extractBudget(teamData);
+        if (!leagueMatchdayId) leagueMatchdayId = teamStateMatchdayId;
 
-        const teamEntry = Array.isArray(teamData?.userTeam) ? teamData.userTeam[0] : null;
+        budget = extractBudget(fetched.teamData);
+
+        const teamEntry = Array.isArray(fetched.teamData?.userTeam) ? fetched.teamData.userTeam[0] : null;
         const subsLeft = teamEntry?.usersubsleft ?? teamEntry?.team_info?.userSubsleft;
 
         if (typeof subsLeft === 'number' && Number.isFinite(subsLeft)) {
@@ -139,15 +191,13 @@ async function fetchSingleLeague(leagueCode) {
         }
 
         try {
-          const rosterMap = await getMatchdayRoster(currentMatchdayId);
-          const composition = _extractRosterItems(teamData, rosterMap);
+          const rosterMap = await getMatchdayRoster(teamStateMatchdayId);
+          const composition = _extractRosterItems(fetched.teamData, rosterMap);
           drivers = composition.drivers;
           constructors = composition.constructors;
         } catch (err) {
           console.log(`   ⚠️ Could not resolve roster for ${teamName}: ${err.message}`);
         }
-      } catch (err) {
-        console.log(`   ⚠️ Could not fetch team data for ${teamName}: ${err.message}`);
       }
     }
 
@@ -174,7 +224,7 @@ async function fetchSingleLeague(leagueCode) {
     const budgetSummary = budget !== null ? ` [budget: ${budget}]` : '';
     const transfersSummary = transfersRemaining !== null ? ` [transfers: ${transfersRemaining}]` : '';
     const rosterSummary = drivers.length || constructors.length
-      ? ` [roster: ${drivers.length}D/${constructors.length}C]`
+      ? ` [roster@md${teamStateMatchdayId}: ${drivers.length}D/${constructors.length}C]`
       : '';
 
     console.log(

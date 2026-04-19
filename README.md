@@ -60,6 +60,11 @@ Two blobs are uploaded per league under `leagues/<leagueCode>/`:
 ### `teams-data.json` — per-team composition
 
 Focused view for rendering team rosters without pulling the full league blob.
+`matchdayId` is the **upcoming** matchday — `budget`, `transfersRemaining`,
+and the drivers/constructors lists reflect the team state going into the
+next race (after any Limitless chip reverts, with the prices that apply
+for that race). When the upcoming matchday is unavailable (e.g. end of
+season), the most-recently-completed matchday is used instead.
 
 ```json
 {
