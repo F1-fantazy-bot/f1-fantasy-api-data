@@ -1,35 +1,18 @@
 /**
- * Budget extraction helpers.
+ * Budget extraction helper.
  *
- * The F1 Fantasy `getOpponentTeam` response returns a single number on
- * `userTeam[0].team_info.teamVal` that already equals
- * `costCapRemaining + sum(driver costs) + sum(constructor costs)` — i.e.
- * the user's definition of "budget". This module just reads it out with a
- * couple of defensive fallbacks for casing variations seen in the API.
+ * The F1 Fantasy `getOpponentTeam` response exposes the full team value on
+ * `userTeam[0].team_info.teamVal` — already equal to
+ * `costCapRemaining + sum(driver costs) + sum(constructor costs)`.
  */
 
 function extractBudget(opponentTeamResponse) {
-  if (!opponentTeamResponse || typeof opponentTeamResponse !== 'object') return null;
+  const entry = Array.isArray(opponentTeamResponse?.userTeam)
+    ? opponentTeamResponse.userTeam[0]
+    : null;
+  const value = entry?.team_info?.teamVal;
 
-  const entry = Array.isArray(opponentTeamResponse.userTeam) ? opponentTeamResponse.userTeam[0] : null;
-
-  if (!entry) return null;
-
-  const candidates = [
-    entry.team_info?.teamVal,
-    entry.team_info?.teamval,
-    entry.team_info?.maxTeambal,
-    entry.teamval,
-    entry.teamVal,
-    entry.maxteambal,
-    entry.maxTeambal,
-  ];
-
-  for (const value of candidates) {
-    if (typeof value === 'number' && Number.isFinite(value)) return value;
-  }
-
-  return null;
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
 module.exports = { extractBudget };
