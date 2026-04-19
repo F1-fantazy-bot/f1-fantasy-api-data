@@ -58,6 +58,7 @@ async function fetchSingleLeague(leagueCode) {
     let raceScores = {};
     let chipsUsed = [];
     let budget = null;
+    let transfersRemaining = null;
     let currentMatchdayId = null;
 
     try {
@@ -86,8 +87,15 @@ async function fetchSingleLeague(leagueCode) {
         const teamData = await f1Api.getOpponentTeam(entry.user_guid, currentMatchdayId, { teamNo });
 
         budget = extractBudget(teamData);
+
+        const teamEntry = Array.isArray(teamData?.userTeam) ? teamData.userTeam[0] : null;
+        const subsLeft = teamEntry?.usersubsleft ?? teamEntry?.team_info?.userSubsleft;
+
+        if (typeof subsLeft === 'number' && Number.isFinite(subsLeft)) {
+          transfersRemaining = subsLeft;
+        }
       } catch (err) {
-        console.log(`   ⚠️ Could not fetch budget for ${teamName}: ${err.message}`);
+        console.log(`   ⚠️ Could not fetch team data for ${teamName}: ${err.message}`);
       }
     }
 
@@ -99,12 +107,16 @@ async function fetchSingleLeague(leagueCode) {
       raceScores,
       chipsUsed,
       budget,
+      transfersRemaining,
     });
 
     const chipSummary = chipsUsed.length ? ` [chips: ${chipsUsed.map((c) => c.name).join(', ')}]` : '';
     const budgetSummary = budget !== null ? ` [budget: ${budget}]` : '';
+    const transfersSummary = transfersRemaining !== null ? ` [transfers: ${transfersRemaining}]` : '';
 
-    console.log(`   ${position}. ${teamName} — ${totalScore} pts${budgetSummary}${chipSummary}`);
+    console.log(
+      `   ${position}. ${teamName} — ${totalScore} pts${budgetSummary}${transfersSummary}${chipSummary}`,
+    );
   }
 
   return {

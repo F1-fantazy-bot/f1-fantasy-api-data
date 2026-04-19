@@ -35,12 +35,13 @@ Entry point `index.js` wires four single-responsibility modules in `src/`:
    extracts chip usage via `src/chips.js` (`extractChipsUsed`). Returns an array
    of league objects `{ fetchedAt, leagueName, leagueCode, leagueId, memberCount,
    teams }`, where each team has `{ teamName, userName, position, totalScore,
-   raceScores, chipsUsed: [{ name, gameDayId }], budget }`. Chip usage comes
-   from top-level `is<Name>taken` / `<name>takengd` flags on the opponent
-   game-days response (see `src/chips.js`). Budget is the single number
-   `userTeam[0].team_info.teamVal` from `getOpponentTeam` for the current
-   matchday (see `src/budget.js`) — already equal to cost-cap-remaining +
-   sum of driver and constructor costs.
+   raceScores, chipsUsed: [{ name, gameDayId }], budget, transfersRemaining }`.
+   Chip usage comes from top-level `is<Name>taken` / `<name>takengd` flags on
+   the opponent game-days response (see `src/chips.js`). Budget is the single
+   number `userTeam[0].team_info.teamVal` from `getOpponentTeam` for the
+   current matchday (see `src/budget.js`) — already equal to cost-cap-
+   remaining plus sum of driver and constructor costs. `transfersRemaining`
+   is `userTeam[0].usersubsleft` from the same response.
 3. `azureBlobStorageService.js` — uploads each league to
    `leagues/<leagueCode>/f1-fantasy-api-data.json` in the configured container.
    Skipped entirely when `AZURE_STORAGE_CONNECTION_STRING` is unset (useful for local
