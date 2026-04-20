@@ -9,6 +9,15 @@ on:
       - 'package.json'
       - '.github/workflows/deploy-infra.yml'
   workflow_dispatch:
+    inputs:
+      deploy_aci:
+        description: 'Deploy ACI (restarts container in prod)'
+        type: boolean
+        default: false
+      deploy_logicapps:
+        description: 'Deploy Logic Apps (runner + scheduler, grant MSI)'
+        type: boolean
+        default: true
 
 permissions:
   id-token: write
@@ -24,7 +33,32 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Detect changed paths
+        id: changes
+        if: github.event_name == 'push'
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            aci:
+              - 'infra/aci/**'
+            logicapps:
+              - 'infra/runner/**'
+              - 'infra/scheduler/**'
+              - 'scripts/grant-runner-msi.sh'
+
+      - name: Resolve deploy flags
+        id: flags
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "aci=${{ inputs.deploy_aci }}" >> "$GITHUB_OUTPUT"
+            echo "logicapps=${{ inputs.deploy_logicapps }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "aci=${{ steps.changes.outputs.aci }}" >> "$GITHUB_OUTPUT"
+            echo "logicapps=${{ steps.changes.outputs.logicapps }}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Azure login
+        if: steps.flags.outputs.aci == 'true' || steps.flags.outputs.logicapps == 'true'
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -32,7 +66,9 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Deploy ACI
+        if: steps.flags.outputs.aci == 'true'
         run: npm run deploy:aci
 
-      - name: Deploy Logic Apps (runner + scheduler)
+      - name: Deploy Logic Apps (runner -> grant MSI -> scheduler)
+        if: steps.flags.outputs.logicapps == 'true'
         run: npm run deploy:logicapps
