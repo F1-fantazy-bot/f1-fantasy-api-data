@@ -11,7 +11,8 @@
     "deploy:aci": "az deployment group create --resource-group f1-fantazy-bot --template-file infra/aci/azuredeploy.json --parameters @infra/aci/azuredeploy.parameters.json",
     "deploy:runner": "az deployment group create --resource-group f1-fantazy-bot --template-file infra/runner/azuredeploy.json --parameters @infra/runner/azuredeploy.parameters.json",
     "deploy:scheduler": "az deployment group create --resource-group f1-fantazy-bot --template-file infra/scheduler/azuredeploy.json --parameters @infra/scheduler/azuredeploy.parameters.json",
-    "deploy:logicapps": "npm run deploy:runner && npm run deploy:scheduler"
+    "deploy:grant-runner-msi": "bash scripts/grant-runner-msi.sh",
+    "deploy:logicapps": "npm run deploy:runner && npm run deploy:grant-runner-msi && npm run deploy:scheduler"
   },
   "keywords": [],
   "author": "Doron Kilzi",
