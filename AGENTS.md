@@ -112,8 +112,15 @@ built-in `pwuser`. If you bump `playwright` in `package.json`, bump the base ima
 in `Dockerfile` to match — version skew between the Playwright client and the bundled
 browsers will break login.
 
-ACI deployment uses `infra/aci/azuredeploy.json` + `azuredeploy.parameters.json`; GitHub
-Actions workflows in `.github/workflows/` build/push the image and send Telegram
+ACI deployment uses `infra/aci/azuredeploy.json` + `azuredeploy.parameters.json`. Logic
+Apps (runner + scheduler) live under `infra/runner/` and `infra/scheduler/`. The runner
+Logic App uses a system-assigned identity to call the ACI `/start` endpoint, so it needs
+Contributor on the ACI — `scripts/grant-runner-msi.sh` handles that idempotently and is
+wired into `npm run deploy:logicapps` between `deploy:runner` and `deploy:scheduler`.
+
+GitHub Actions workflows in `.github/workflows/` build/push the image
+(`docker-build-push.yml`), deploy infra on changes to `infra/**` or the grant script
+(`deploy-infra.yml`, runs `deploy:aci` then `deploy:logicapps`), and send Telegram
 notifications on commits and PRs.
 
 ## update your instructions
