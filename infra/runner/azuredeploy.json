@@ -140,6 +140,20 @@
               "runAfter": {
                 "Try": ["Failed", "TimedOut"]
               }
+            },
+            "Terminate_Run_As_Failed": {
+              "type": "Terminate",
+              "inputs": {
+                "runStatus": "Failed",
+                "runError": {
+                  "code": "LogicAppScopeFailed",
+                  "message": "Try scope failed; see Notify_* action outputs for details."
+                }
+              },
+              "runAfter": {
+                "Notify_Log_Channel_On_Failure": ["Succeeded", "Failed", "Skipped", "TimedOut"],
+                "Notify_Errors_Channel_On_Failure": ["Succeeded", "Failed", "Skipped", "TimedOut"]
+              }
             }
           }
         },
