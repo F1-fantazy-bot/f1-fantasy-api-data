@@ -34,6 +34,12 @@
       "metadata": {
         "description": "Name of the ACI container group to start."
       }
+    },
+    "telegramBotToken": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Telegram bot token used to post Logic App failure notifications."
+      }
     }
   },
   "variables": {
@@ -63,31 +69,67 @@
             }
           },
           "actions": {
-            "Start_ACI": {
-              "type": "Http",
-              "inputs": {
-                "method": "POST",
-                "uri": "[variables('aciStartUri')]",
-                "authentication": {
-                  "type": "ManagedServiceIdentity",
-                  "audience": "https://management.azure.com/"
+            "Try": {
+              "type": "Scope",
+              "actions": {
+                "Start_ACI": {
+                  "type": "Http",
+                  "inputs": {
+                    "method": "POST",
+                    "uri": "[variables('aciStartUri')]",
+                    "authentication": {
+                      "type": "ManagedServiceIdentity",
+                      "audience": "https://management.azure.com/"
+                    }
+                  },
+                  "runAfter": {}
+                },
+                "Return_Success": {
+                  "type": "Response",
+                  "kind": "Http",
+                  "inputs": {
+                    "statusCode": 200,
+                    "body": {
+                      "status": "start_requested"
+                    }
+                  },
+                  "runAfter": {
+                    "Start_ACI": [
+                      "Succeeded"
+                    ]
+                  }
                 }
               },
               "runAfter": {}
             },
-            "Return_Success": {
-              "type": "Response",
-              "kind": "Http",
+            "Notify_Log_Channel_On_Failure": {
+              "type": "Http",
               "inputs": {
-                "statusCode": 200,
+                "method": "POST",
+                "uri": "[concat('https://api.telegram.org/bot', parameters('telegramBotToken'), '/sendMessage')]",
+                "headers": { "Content-Type": "application/json" },
                 "body": {
-                  "status": "start_requested"
+                  "chat_id": -1002298860617,
+                  "text": "@{concat('🚨 Logic App ', workflow().name, ' failed\n\nRun: ', workflow().run.name, '\nTime (UTC): ', utcNow(), '\n\nFailed actions:\n', take(string(filter(result('Try'), equals(item()?['status'], 'Failed'))), 3500))}"
                 }
               },
               "runAfter": {
-                "Start_ACI": [
-                  "Succeeded"
-                ]
+                "Try": ["Failed", "TimedOut"]
+              }
+            },
+            "Notify_Errors_Channel_On_Failure": {
+              "type": "Http",
+              "inputs": {
+                "method": "POST",
+                "uri": "[concat('https://api.telegram.org/bot', parameters('telegramBotToken'), '/sendMessage')]",
+                "headers": { "Content-Type": "application/json" },
+                "body": {
+                  "chat_id": -5167373779,
+                  "text": "@{concat('🚨 Logic App ', workflow().name, ' failed\n\nRun: ', workflow().run.name, '\nTime (UTC): ', utcNow(), '\n\nFailed actions:\n', take(string(filter(result('Try'), equals(item()?['status'], 'Failed'))), 3500))}"
+                }
+              },
+              "runAfter": {
+                "Try": ["Failed", "TimedOut"]
               }
             }
           }

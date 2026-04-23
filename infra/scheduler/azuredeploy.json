@@ -22,6 +22,12 @@
       "metadata": {
         "description": "Name of the runner Logic App to invoke."
       }
+    },
+    "telegramBotToken": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Telegram bot token used to post Logic App failure notifications."
+      }
     }
   },
   "resources": [
@@ -57,13 +63,49 @@
             }
           },
           "actions": {
-            "Trigger_Runner": {
+            "Try": {
+              "type": "Scope",
+              "actions": {
+                "Trigger_Runner": {
+                  "type": "Http",
+                  "inputs": {
+                    "method": "POST",
+                    "uri": "[listCallbackUrl(resourceId('Microsoft.Logic/workflows/triggers', parameters('runnerLogicAppName'), 'manual'), '2016-06-01').value]"
+                  },
+                  "runAfter": {}
+                }
+              },
+              "runAfter": {}
+            },
+            "Notify_Log_Channel_On_Failure": {
               "type": "Http",
               "inputs": {
                 "method": "POST",
-                "uri": "[listCallbackUrl(resourceId('Microsoft.Logic/workflows/triggers', parameters('runnerLogicAppName'), 'manual'), '2016-06-01').value]"
+                "uri": "[concat('https://api.telegram.org/bot', parameters('telegramBotToken'), '/sendMessage')]",
+                "headers": { "Content-Type": "application/json" },
+                "body": {
+                  "chat_id": -1002298860617,
+                  "text": "@{concat('🚨 Logic App ', workflow().name, ' failed\n\nRun: ', workflow().run.name, '\nTime (UTC): ', utcNow(), '\n\nFailed actions:\n', take(string(filter(result('Try'), equals(item()?['status'], 'Failed'))), 3500))}"
+                }
               },
-              "runAfter": {}
+              "runAfter": {
+                "Try": ["Failed", "TimedOut"]
+              }
+            },
+            "Notify_Errors_Channel_On_Failure": {
+              "type": "Http",
+              "inputs": {
+                "method": "POST",
+                "uri": "[concat('https://api.telegram.org/bot', parameters('telegramBotToken'), '/sendMessage')]",
+                "headers": { "Content-Type": "application/json" },
+                "body": {
+                  "chat_id": -5167373779,
+                  "text": "@{concat('🚨 Logic App ', workflow().name, ' failed\n\nRun: ', workflow().run.name, '\nTime (UTC): ', utcNow(), '\n\nFailed actions:\n', take(string(filter(result('Try'), equals(item()?['status'], 'Failed'))), 3500))}"
+                }
+              },
+              "runAfter": {
+                "Try": ["Failed", "TimedOut"]
+              }
             }
           }
         }
