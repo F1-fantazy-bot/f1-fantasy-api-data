@@ -37,6 +37,14 @@ Two blobs are uploaded per league under `leagues/<leagueCode>/`:
 
 ### `league-standings.json` — leaderboard + per-race scores
 
+`raceBudgets` mirrors `raceScores` and records each team's budget cap at the
+**start** of each race (`team_info.maxTeambal` — cost-cap-remaining + roster
+cost at lock prices). For matchday 1 this is always `100` (season-start cap).
+It is populated **incrementally**: on each run the existing blob is
+downloaded and only matchdays missing from the prior `raceBudgets` trigger
+an extra `getOpponentTeam` call, so steady-state runs add essentially no
+extra API traffic.
+
 ```json
 {
   "fetchedAt": "2025-04-19T09:00:00.000Z",
@@ -51,6 +59,7 @@ Two blobs are uploaded per league under `leagues/<leagueCode>/`:
       "position": 1,
       "totalScore": 500,
       "raceScores": { "matchday_1": 50, "matchday_2": 60 },
+      "raceBudgets": { "matchday_1": 100.0, "matchday_2": 100.8 },
       "chipsUsed": [{ "name": "Limitless", "gameDayId": 3 }]
     }
   ]
