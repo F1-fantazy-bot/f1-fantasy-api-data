@@ -41,6 +41,9 @@
         "definition": {
           "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
           "contentVersion": "1.0.0.0",
+          "parameters": {
+            "telegramBotToken": { "type": "SecureString" }
+          },
           "triggers": {
             "Every_Monday": {
               "type": "Recurrence",
@@ -81,12 +84,15 @@
               "type": "Http",
               "inputs": {
                 "method": "POST",
-                "uri": "[concat('https://api.telegram.org/bot', parameters('telegramBotToken'), '/sendMessage')]",
+                "uri": "@{concat('https://api.telegram.org/bot', parameters('telegramBotToken'), '/sendMessage')}",
                 "headers": { "Content-Type": "application/json" },
                 "body": {
                   "chat_id": -1002298860617,
                   "text": "@{concat('🚨 Logic App ', workflow().name, ' failed\n\nRun: ', workflow().run.name, '\nTime (UTC): ', utcNow(), '\n\nFailed actions:\n', take(string(filter(result('Try'), equals(item()?['status'], 'Failed'))), 3500))}"
                 }
+              },
+              "runtimeConfiguration": {
+                "secureData": { "properties": ["inputs", "outputs"] }
               },
               "runAfter": {
                 "Try": ["Failed", "TimedOut"]
@@ -96,17 +102,25 @@
               "type": "Http",
               "inputs": {
                 "method": "POST",
-                "uri": "[concat('https://api.telegram.org/bot', parameters('telegramBotToken'), '/sendMessage')]",
+                "uri": "@{concat('https://api.telegram.org/bot', parameters('telegramBotToken'), '/sendMessage')}",
                 "headers": { "Content-Type": "application/json" },
                 "body": {
                   "chat_id": -5167373779,
                   "text": "@{concat('🚨 Logic App ', workflow().name, ' failed\n\nRun: ', workflow().run.name, '\nTime (UTC): ', utcNow(), '\n\nFailed actions:\n', take(string(filter(result('Try'), equals(item()?['status'], 'Failed'))), 3500))}"
                 }
               },
+              "runtimeConfiguration": {
+                "secureData": { "properties": ["inputs", "outputs"] }
+              },
               "runAfter": {
                 "Try": ["Failed", "TimedOut"]
               }
             }
+          }
+        },
+        "parameters": {
+          "telegramBotToken": {
+            "value": "[parameters('telegramBotToken')]"
           }
         }
       }
