@@ -4,8 +4,9 @@
  */
 const f1Api = require('./f1FantasyApiService');
 const { extractChipsUsed } = require('./chips');
-const { extractBudget } = require('./budget');
+const { extractBudget, extractStartBudget } = require('./budget');
 const { getMatchdayRoster, resetCache: resetRosterCache } = require('./rosterService');
+const { downloadDataFromAzureStorage } = require('./azureBlobStorageService');
 
 async function fetchAllLeaguesData() {
   console.log('1. Logging in to F1 Fantasy...');
@@ -37,6 +38,10 @@ async function fetchAllLeaguesData() {
   console.log(`\n✅ Done: ${results.length}/${privateLeagues.length} leagues fetched`);
 
   return results;
+}
+
+function _teamKey(userName, teamName) {
+  return `${userName || ''}::${teamName || ''}`;
 }
 
 function _isValidTeamState(teamData) {
@@ -122,6 +127,23 @@ async function fetchSingleLeague(leagueCode) {
   const leaderboard = await f1Api.getLeagueLeaderboard(leagueId);
   console.log(`   ${leaderboard.length} teams`);
 
+  let priorRaceBudgetsByTeam = new Map();
+
+  try {
+    const priorLeague = await downloadDataFromAzureStorage(leagueCode);
+
+    if (priorLeague && Array.isArray(priorLeague.teams)) {
+      for (const prior of priorLeague.teams) {
+        if (prior?.raceBudgets && typeof prior.raceBudgets === 'object') {
+          priorRaceBudgetsByTeam.set(_teamKey(prior.userName, prior.teamName), prior.raceBudgets);
+        }
+      }
+      console.log(`   Loaded prior raceBudgets for ${priorRaceBudgetsByTeam.size} teams`);
+    }
+  } catch (err) {
+    console.log(`   ⚠️ Could not load prior league-standings.json: ${err.message}`);
+  }
+
   console.log('   Fetching per-race scores...');
   const teams = [];
   const teamsComposition = [];
@@ -140,6 +162,10 @@ async function fetchSingleLeague(leagueCode) {
     let teamStateMatchdayId = null;
     let drivers = [];
     let constructors = [];
+    let raceBudgets = {
+      ...(priorRaceBudgetsByTeam.get(_teamKey(entry.user_name, teamName)) || {}),
+    };
+    let completedMatchdayIds = [];
 
     try {
       const oppData = await f1Api.getOpponentGameDays(entry.user_guid, teamNo);
@@ -149,9 +175,9 @@ async function fetchSingleLeague(leagueCode) {
         raceScores[`matchday_${matchdayId}`] = details.pts;
       }
 
-      const mdIds = Object.keys(mdDetails).map(Number).filter(Number.isFinite);
+      completedMatchdayIds = Object.keys(mdDetails).map(Number).filter(Number.isFinite);
 
-      if (mdIds.length) lastCompletedMatchdayId = Math.max(...mdIds);
+      if (completedMatchdayIds.length) lastCompletedMatchdayId = Math.max(...completedMatchdayIds);
 
       try {
         chipsUsed = extractChipsUsed(oppData);
@@ -198,6 +224,37 @@ async function fetchSingleLeague(leagueCode) {
         } catch (err) {
           console.log(`   ⚠️ Could not resolve roster for ${teamName}: ${err.message}`);
         }
+
+        // The upcoming race's start-of-week budget (maxTeambal) is already
+        // finalized once the previous race ends — cost-cap carries over from
+        // historical price rises and doesn't shift with in-week transfers.
+        // Capture it from the response we already have so consumers can see
+        // the next race's budget without waiting for the race to complete.
+        const startBudget = extractStartBudget(fetched.teamData);
+
+        if (startBudget !== null) {
+          raceBudgets[`matchday_${teamStateMatchdayId}`] = startBudget;
+        }
+      }
+    }
+
+    // Historical per-race budgets: fetch only matchdays missing from the prior blob.
+    const missingMdIds = completedMatchdayIds.filter(
+      (mdid) => raceBudgets[`matchday_${mdid}`] === undefined,
+    );
+
+    for (const mdid of missingMdIds) {
+      try {
+        const teamData = await f1Api.getOpponentTeam(entry.user_guid, mdid, { teamNo });
+        const val = extractStartBudget(teamData);
+
+        if (val !== null) {
+          raceBudgets[`matchday_${mdid}`] = val;
+        }
+      } catch (err) {
+        console.log(
+          `   ⚠️ Could not fetch budget for ${teamName} matchday ${mdid}: ${err.message}`,
+        );
       }
     }
 
@@ -207,6 +264,7 @@ async function fetchSingleLeague(leagueCode) {
       position,
       totalScore,
       raceScores,
+      raceBudgets,
       chipsUsed,
     });
 
@@ -226,9 +284,12 @@ async function fetchSingleLeague(leagueCode) {
     const rosterSummary = drivers.length || constructors.length
       ? ` [roster@md${teamStateMatchdayId}: ${drivers.length}D/${constructors.length}C]`
       : '';
+    const raceBudgetSummary = missingMdIds.length
+      ? ` [+${missingMdIds.length} raceBudget${missingMdIds.length === 1 ? '' : 's'}]`
+      : '';
 
     console.log(
-      `   ${position}. ${teamName} — ${totalScore} pts${budgetSummary}${transfersSummary}${rosterSummary}${chipSummary}`,
+      `   ${position}. ${teamName} — ${totalScore} pts${budgetSummary}${transfersSummary}${rosterSummary}${raceBudgetSummary}${chipSummary}`,
     );
   }
 

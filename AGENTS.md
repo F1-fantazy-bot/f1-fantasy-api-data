@@ -38,7 +38,15 @@ Entry point `index.js` wires four single-responsibility modules in `src/`:
    `{ league, teamsData }` tuples per league.
    - `league`: `{ fetchedAt, leagueName, leagueCode, leagueId, memberCount,
 teams }`, where each team has `{ teamName, userName, position,
-totalScore, raceScores, chipsUsed: [{ name, gameDayId }] }`.
+totalScore, raceScores, raceBudgets, chipsUsed: [{ name, gameDayId }] }`.
+     `raceBudgets` mirrors `raceScores` (keyed `matchday_<id>`) and stores the
+     team's budget cap at the **start** of that race
+     (`team_info.maxTeambal` — cost-cap-remaining + roster cost at lock
+     prices). For matchday 1 this is always `100` (season-start cap).
+     It is populated **incrementally**: `fetchSingleLeague` downloads the
+     prior `league-standings.json` from blob storage and only calls
+     `getOpponentTeam` for matchdays missing from the existing
+     `raceBudgets`, so steady-state runs add ~0 extra API calls per team.
      Budget and transfers live only in the `teamsData` blob.
    - `teamsData`: `{ fetchedAt, leagueName, leagueCode, leagueId,
   matchdayId, teams }` where each team has `{ teamName, userName,
