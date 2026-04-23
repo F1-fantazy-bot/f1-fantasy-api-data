@@ -151,8 +151,8 @@
                 }
               },
               "runAfter": {
-                "Notify_Log_Channel_On_Failure": ["Succeeded", "Failed", "Skipped", "TimedOut"],
-                "Notify_Errors_Channel_On_Failure": ["Succeeded", "Failed", "Skipped", "TimedOut"]
+                "Notify_Log_Channel_On_Failure": ["Succeeded", "Failed", "TimedOut"],
+                "Notify_Errors_Channel_On_Failure": ["Succeeded", "Failed", "TimedOut"]
               }
             }
           }
