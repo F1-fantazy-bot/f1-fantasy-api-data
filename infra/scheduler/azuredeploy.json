@@ -88,7 +88,7 @@
                 "headers": { "Content-Type": "application/json" },
                 "body": {
                   "chat_id": -1002298860617,
-                  "text": "@{concat('🚨 Logic App ', workflow().name, ' failed\n\nRun: ', workflow().run.name, '\nTime (UTC): ', utcNow(), '\n\nFailed actions:\n', take(string(filter(result('Try'), equals(item()?['status'], 'Failed'))), 3500))}"
+                  "text": "@{concat('🚨 Logic App ', workflow().name, ' failed\n\nRun: ', workflow().run.name, '\nTime (UTC): ', utcNow(), '\n\nFailed actions:\n', take(string(result('Try')), 3500))}"
                 }
               },
               "runtimeConfiguration": {
@@ -106,7 +106,7 @@
                 "headers": { "Content-Type": "application/json" },
                 "body": {
                   "chat_id": -5167373779,
-                  "text": "@{concat('🚨 Logic App ', workflow().name, ' failed\n\nRun: ', workflow().run.name, '\nTime (UTC): ', utcNow(), '\n\nFailed actions:\n', take(string(filter(result('Try'), equals(item()?['status'], 'Failed'))), 3500))}"
+                  "text": "@{concat('🚨 Logic App ', workflow().name, ' failed\n\nRun: ', workflow().run.name, '\nTime (UTC): ', utcNow(), '\n\nFailed actions:\n', take(string(result('Try')), 3500))}"
                 }
               },
               "runtimeConfiguration": {
