@@ -224,6 +224,17 @@ async function fetchSingleLeague(leagueCode) {
         } catch (err) {
           console.log(`   ⚠️ Could not resolve roster for ${teamName}: ${err.message}`);
         }
+
+        // The upcoming race's start-of-week budget (maxTeambal) is already
+        // finalized once the previous race ends — cost-cap carries over from
+        // historical price rises and doesn't shift with in-week transfers.
+        // Capture it from the response we already have so consumers can see
+        // the next race's budget without waiting for the race to complete.
+        const startBudget = extractStartBudget(fetched.teamData);
+
+        if (startBudget !== null) {
+          raceBudgets[`matchday_${teamStateMatchdayId}`] = startBudget;
+        }
       }
     }
 
