@@ -102,27 +102,44 @@ async function _fetchLockedTeamSnapshot(entry, teamName) {
     .filter(Number.isFinite);
 
   if (completedMatchdayIds.length === 0) {
-    console.log(`   ⚠️ No completed matchdays yet for ${teamName} — skipping`);
+    console.log(`   ⚠️ No matchdays in mdDetails for ${teamName} — skipping`);
 
     return null;
   }
 
-  const lockedMatchdayId = Math.max(...completedMatchdayIds) + 1;
+  const lastInDetails = Math.max(...completedMatchdayIds);
 
-  let teamData;
-  try {
-    teamData = await f1Api.getOpponentTeam(entry.user_guid, lockedMatchdayId, { teamNo });
-  } catch (err) {
-    console.log(
-      `   ⚠️ Could not fetch locked team for ${teamName} matchday ${lockedMatchdayId}: ${err.message}`,
-    );
+  // The "imminent race weekend" can be either lastInDetails+1 (between
+  // weekends, after the previous race fully scored) or lastInDetails itself
+  // (during a weekend after the first sub-event already scored — typically a
+  // sprint that happened earlier in the same weekend).
+  // Try +1 first; if the API returns an empty/null state for that matchday
+  // (no playerid, no teamVal) it means that matchday hasn't been locked yet,
+  // and the currently-in-progress weekend is lastInDetails.
+  const candidateMatchdays = [lastInDetails + 1, lastInDetails];
+  let teamData = null;
+  let lockedMatchdayId = null;
 
-    return null;
+  for (const md of candidateMatchdays) {
+    let resp;
+    try {
+      resp = await f1Api.getOpponentTeam(entry.user_guid, md, { teamNo });
+    } catch (err) {
+      console.log(
+        `   ⚠️ getOpponentTeam(${md}) failed for ${teamName}: ${err.message}`,
+      );
+      continue;
+    }
+    if (_isValidTeamState(resp)) {
+      teamData = resp;
+      lockedMatchdayId = md;
+      break;
+    }
   }
 
-  if (!_isValidTeamState(teamData)) {
+  if (!teamData) {
     console.log(
-      `   ⚠️ Locked team state invalid for ${teamName} matchday ${lockedMatchdayId} — skipping`,
+      `   ⚠️ Locked team state invalid for ${teamName} (tried md ${candidateMatchdays.join(', ')}) — skipping`,
     );
 
     return null;

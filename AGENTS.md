@@ -105,22 +105,25 @@ totalScore, raceScores, raceBudgets, chipsUsed: [{ name, gameDayId }] }`.
 5. `fetchLockedLeagueData.js` — locked-snapshot orchestration. Mirrors a
    minimal subset of `fetchLeagueData.js`: for each private league it
    calls `getLeagueLeaderboard`, then for each team uses
-   `getOpponentGameDays` to compute the **just-locked** matchday
-   (`max(completedMatchdayIds) + 1`), fetches `getOpponentTeam` for that
-   matchday, resolves the roster via `rosterService`, extracts chips via
-   `chips.js`, and returns one snapshot per team. Snapshots are grouped
-   by `matchdayId` so each league produces one blob per locked matchday.
-   Per-team failures are logged and skipped — they don't abort the
-   league. Output blob shape:
+   `getOpponentGameDays` to find the latest matchday in `mdDetails` and
+   probes `getOpponentTeam` first for `lastInDetails + 1` (between
+   weekends) and falls back to `lastInDetails` (during a weekend after
+   the first sub-event scored — typically a sprint that already
+   completed). The first matchday with a valid `team_info.teamVal` plus
+   non-empty `playerid` array is taken as the locked one. Resolves the
+   roster via `rosterService`, extracts chips via `chips.js`, and
+   returns one snapshot per team. Snapshots are grouped by `matchdayId`
+   so each league produces one blob per locked matchday. Per-team
+   failures are logged and skipped. Output blob shape:
    ```jsonc
    {
      "fetchedAt":   "<ISO>",
      "mode":        "locked",
      "leagueName":  "...", "leagueCode": "...", "leagueId": 1,
-     "matchdayId":  6,
+     "matchdayId":  4,
      "teams": [
        { "teamName":"...", "userName":"...", "position":1,
-         "matchdayId":6, "budget":101.3, "transfersRemaining":0,
+         "matchdayId":4, "budget":107.8, "transfersRemaining":0,
          "drivers":[{id,name,price,isCaptain,isMegaCaptain,isFinal}],
          "constructors":[…],
          "chipsUsed":[{name,gameDayId}] }
