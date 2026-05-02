@@ -168,16 +168,67 @@ built-in `pwuser`. If you bump `playwright` in `package.json`, bump the base ima
 in `Dockerfile` to match — version skew between the Playwright client and the bundled
 browsers will break login.
 
+The pipeline ships **two parallel deployment stacks** that share one Docker image
+but have completely independent Azure resources so neither can disrupt the other.
+
+### Weekly stack (default — drives `league-standings.json` + `teams-data.json`)
+
 ACI deployment uses `infra/aci/azuredeploy.json` + `azuredeploy.parameters.json`. Logic
 Apps (runner + scheduler) live under `infra/runner/` and `infra/scheduler/`. The runner
 Logic App uses a system-assigned identity to call the ACI `/start` endpoint, so it needs
 Contributor on the ACI — `scripts/grant-runner-msi.sh` handles that idempotently and is
 wired into `npm run deploy:logicapps` between `deploy:runner` and `deploy:scheduler`.
+The scheduler fires every Monday 03:00 UTC.
+
+### Locked-snapshot stack (drives `leagues/{code}/locked/matchday_{N}.json`)
+
+Mirror of the weekly stack with `-locked` suffixes. Mode is selected via the `MODE`
+env var baked into the ACI deployment (`scrapeMode: "locked"`), so the same image
+runs the locked path without command overrides.
+
+- `infra/aci-locked/` — second ACI container group (`f1-fantasy-api-data-aci-locked`),
+  same Key Vault references as weekly, plus `MODE=locked` in `environmentVariables`.
+- `infra/runner-locked/` — runner Logic App (`f1-fantasy-api-data-runner-locked`)
+  pointing at the locked ACI. The MSI grant is reused via
+  `LOGIC_APP_NAME=… ACI_NAME=… bash scripts/grant-runner-msi.sh` (see
+  `deploy:grant-runner-msi-locked`).
+- `infra/scheduler-locked/` — calendar-aware scheduler Logic App
+  (`f1-fantasy-api-data-scheduler-locked`). Recurrence trigger fires every hour at
+  `:01` UTC. On each pulse it:
+    1. HTTP GETs `https://api.jolpi.ca/ergast/f1/current/next.json` (Jolpica/Ergast
+       proxy of the next race in the current season).
+    2. Computes the current top-of-hour as `concat(formatDateTime(startOfHour(utcNow()), 'yyyy-MM-ddTHH:mm:ss'), 'Z')`.
+    3. Builds candidate session-start strings as `date + 'T' + time` for
+       `Qualifying`, `Sprint` (sprint weekends only), and the race itself.
+    4. If top-of-hour equals any candidate → POSTs the runner-locked manual trigger
+       and notifies the log channel; otherwise no-op.
+
+  Why hourly @ X:01: F1 sessions always start on the hour (HH:00:00Z in the Jolpica
+  schema), so equality on top-of-hour is sufficient. Firing at X:01 means the runner
+  fires ~1 minute after the session starts. Idempotency: the locked scrape writes
+  `matchday_N.json` deterministically, so a duplicate fire is safe.
+
+  Why match `Sprint` (the sprint race) and not `SprintQualifying`: by the time the
+  sprint race starts on Saturday the F1 Fantasy sprint lock has been in effect since
+  the start of sprint qualifying on Friday, so the locked roster is already
+  capturable. SprintQualifying also doesn't always start on the hour
+  (e.g. `20:30:00Z`), which our top-of-hour matcher would miss.
+
+Deploy commands:
+- `npm run deploy:locked` — full locked stack (ACI + runner + grant + scheduler).
+- Individual: `deploy:aci-locked`, `deploy:runner-locked`,
+  `deploy:grant-runner-msi-locked`, `deploy:scheduler-locked`.
+- `deploy:logicapps-locked` — runner + grant + scheduler only (skips ACI).
 
 GitHub Actions workflows in `.github/workflows/` build/push the image
-(`docker-build-push.yml`), deploy infra on changes to `infra/**` or the grant script
-(`deploy-infra.yml`, runs `deploy:aci` then `deploy:logicapps`), and send Telegram
-notifications on commits and PRs.
+(`docker-build-push.yml`); deploy the weekly stack on changes to
+`infra/aci/**`, `infra/runner/**`, `infra/scheduler/**`, or the grant script
+(`deploy-aci.yml` + `deploy-logicapps.yml`); and deploy the locked stack on
+changes to `infra/aci-locked/**`, `infra/runner-locked/**`,
+`infra/scheduler-locked/**`, or the grant script (`deploy-aci-locked.yml`
++ `deploy-logicapps-locked.yml`). All four deploy workflows also support
+`workflow_dispatch` for manual triggering. Telegram notifications fire on
+commits and PRs.
 
 ## update your instructions
 
