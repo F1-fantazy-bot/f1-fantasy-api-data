@@ -9,7 +9,8 @@ and exits. Deployed as an Azure Container Instance (see `infra/aci/`).
 ```bash
 npm install
 npx playwright install chromium   # required once before first run
-npm start                         # runs index.js end-to-end (needs .env)
+npm start                         # weekly scrape — runs index.js end-to-end (needs .env)
+npm run scrape:locked             # locked-snapshot scrape (sets MODE=locked)
 npm run lint                      # eslint .
 npm run lint:fix
 npm run format                    # prettier --write .
@@ -22,7 +23,24 @@ To iterate on login/scraping with a visible browser, set `F1_HEADLESS=false` in 
 
 ## Architecture
 
-Entry point `index.js` wires four single-responsibility modules in `src/`:
+`index.js` switches on `MODE` env var (default `weekly`):
+
+- `MODE=weekly` → runs `fetchAllLeaguesData()` and uploads
+  `league-standings.json` + `teams-data.json` per league. Used by the
+  Monday Logic App scheduler. **This path is unchanged.**
+- `MODE=locked` → runs `fetchAllLeaguesLocked()` and uploads only
+  `leagues/{code}/locked/matchday_{N}.json`, one blob per (league,
+  matchday). Used by the locked-snapshot Logic App scheduler that fires
+  shortly after each session start (qualifying / race / sprint).
+
+Why two modes: the locked snapshot must be captured between **lock**
+(start of qualifying / sprint qualifying) and **race end**. Once the race
+ends F1 Fantasy auto-reverts Limitless, so a post-race fetch of the same
+matchday would silently overwrite the temporary mega-squad. The Monday
+weekly scrape captures "next-week planning" view (upcoming md = N+1) and
+must keep its current cadence.
+
+Both modes share four single-responsibility modules in `src/`:
 
 1. `f1FantasyApiService.js` — **the only module that talks to F1**. Holds module-level
    `browser` / `context` / `page` / `sessionData` singletons. `init()` launches Chromium,
@@ -72,13 +90,43 @@ totalScore, raceScores, raceBudgets, chipsUsed: [{ name, gameDayId }] }`.
      fetch per matchday.
 3. `azureBlobStorageService.js` — uploads to
    `leagues/<leagueCode>/<blobName>` in the configured container. `blobName`
-   defaults to `league-standings.json`; `index.js` also uploads
-   `teams-data.json` per league. Skipped entirely when
-   `AZURE_STORAGE_CONNECTION_STRING` is unset (useful for local dry runs).
+   defaults to `league-standings.json`; the weekly path also uploads
+   `teams-data.json` per league, and the locked path uploads
+   `locked/matchday_{N}.json` per league per locked matchday. Skipped
+   entirely when `AZURE_STORAGE_CONNECTION_STRING` is unset (useful for
+   local dry runs).
 4. `telegramService.js` — singleton instance (`module.exports = new TelegramService()`).
-   Sends success to `LOG_CHANNEL_ID`, errors to **both** log and errors channels.
-   Messages to those channels are auto-prefixed with `F1_FANTASY_API: `. No-ops with a
-   warning if `TELEGRAM_BOT_TOKEN` is missing.
+   Sends success to `LOG_CHANNEL_ID` (with separate `notifySuccess` /
+   `notifySuccessLocked` messages so the channel makes the mode obvious),
+   errors to **both** log and errors channels. Messages to those channels
+   are auto-prefixed with `F1_FANTASY_API: `. No-ops with a warning if
+   `TELEGRAM_BOT_TOKEN` is missing.
+
+5. `fetchLockedLeagueData.js` — locked-snapshot orchestration. Mirrors a
+   minimal subset of `fetchLeagueData.js`: for each private league it
+   calls `getLeagueLeaderboard`, then for each team uses
+   `getOpponentGameDays` to compute the **just-locked** matchday
+   (`max(completedMatchdayIds) + 1`), fetches `getOpponentTeam` for that
+   matchday, resolves the roster via `rosterService`, extracts chips via
+   `chips.js`, and returns one snapshot per team. Snapshots are grouped
+   by `matchdayId` so each league produces one blob per locked matchday.
+   Per-team failures are logged and skipped — they don't abort the
+   league. Output blob shape:
+   ```jsonc
+   {
+     "fetchedAt":   "<ISO>",
+     "mode":        "locked",
+     "leagueName":  "...", "leagueCode": "...", "leagueId": 1,
+     "matchdayId":  6,
+     "teams": [
+       { "teamName":"...", "userName":"...", "position":1,
+         "matchdayId":6, "budget":101.3, "transfersRemaining":0,
+         "drivers":[{id,name,price,isCaptain,isMegaCaptain,isFinal}],
+         "constructors":[…],
+         "chipsUsed":[{name,gameDayId}] }
+     ]
+   }
+   ```
 
 ### How API calls actually work
 
