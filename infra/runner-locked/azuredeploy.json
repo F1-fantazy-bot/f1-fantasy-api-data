@@ -1,0 +1,185 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "logicAppName": {
+      "type": "string",
+      "defaultValue": "f1-fantasy-api-data-runner-locked",
+      "metadata": {
+        "description": "Name of the locked-snapshot runner Logic App resource."
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Azure region for the Logic App."
+      }
+    },
+    "subscriptionId": {
+      "type": "string",
+      "metadata": {
+        "description": "Azure subscription ID where the ACI resource lives."
+      }
+    },
+    "aciResourceGroup": {
+      "type": "string",
+      "metadata": {
+        "description": "Resource group containing the ACI container group."
+      }
+    },
+    "containerGroupName": {
+      "type": "string",
+      "defaultValue": "f1-fantasy-api-data-aci-locked",
+      "metadata": {
+        "description": "Name of the locked-snapshot ACI container group to start."
+      }
+    },
+    "telegramBotToken": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Telegram bot token used to post Logic App failure notifications."
+      }
+    }
+  },
+  "variables": {
+    "aciStartUri": "[concat('https://management.azure.com/subscriptions/', parameters('subscriptionId'), '/resourceGroups/', parameters('aciResourceGroup'), '/providers/Microsoft.ContainerInstance/containerGroups/', parameters('containerGroupName'), '/start?api-version=2023-05-01')]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Logic/workflows",
+      "apiVersion": "2019-05-01",
+      "name": "[parameters('logicAppName')]",
+      "location": "[parameters('location')]",
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "properties": {
+        "state": "Enabled",
+        "definition": {
+          "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+          "contentVersion": "1.0.0.0",
+          "parameters": {
+            "telegramBotToken": { "type": "SecureString" }
+          },
+          "triggers": {
+            "manual": {
+              "type": "Request",
+              "kind": "Http",
+              "inputs": {
+                "schema": {}
+              }
+            }
+          },
+          "actions": {
+            "Try": {
+              "type": "Scope",
+              "actions": {
+                "Start_ACI": {
+                  "type": "Http",
+                  "inputs": {
+                    "method": "POST",
+                    "uri": "[variables('aciStartUri')]",
+                    "authentication": {
+                      "type": "ManagedServiceIdentity",
+                      "audience": "https://management.azure.com/"
+                    }
+                  },
+                  "runAfter": {}
+                },
+                "Return_Success": {
+                  "type": "Response",
+                  "kind": "Http",
+                  "inputs": {
+                    "statusCode": 200,
+                    "body": {
+                      "status": "start_requested"
+                    }
+                  },
+                  "runAfter": {
+                    "Start_ACI": [
+                      "Succeeded"
+                    ]
+                  }
+                }
+              },
+              "runAfter": {}
+            },
+            "Notify_Log_Channel_On_Failure": {
+              "type": "Http",
+              "inputs": {
+                "method": "POST",
+                "uri": "@{concat('https://api.telegram.org/bot', parameters('telegramBotToken'), '/sendMessage')}",
+                "headers": { "Content-Type": "application/json" },
+                "body": {
+                  "chat_id": -1002298860617,
+                  "text": "@{concat('🚨 Logic App ', workflow().name, ' failed\n\nRun: ', workflow().run.name, '\nTime (UTC): ', utcNow(), '\n\nFailed actions:\n', take(string(result('Try')), 3500))}"
+                }
+              },
+              "runtimeConfiguration": {
+                "secureData": { "properties": ["inputs", "outputs"] }
+              },
+              "runAfter": {
+                "Try": ["Failed", "TimedOut"]
+              }
+            },
+            "Notify_Errors_Channel_On_Failure": {
+              "type": "Http",
+              "inputs": {
+                "method": "POST",
+                "uri": "@{concat('https://api.telegram.org/bot', parameters('telegramBotToken'), '/sendMessage')}",
+                "headers": { "Content-Type": "application/json" },
+                "body": {
+                  "chat_id": -5167373779,
+                  "text": "@{concat('🚨 Logic App ', workflow().name, ' failed\n\nRun: ', workflow().run.name, '\nTime (UTC): ', utcNow(), '\n\nFailed actions:\n', take(string(result('Try')), 3500))}"
+                }
+              },
+              "runtimeConfiguration": {
+                "secureData": { "properties": ["inputs", "outputs"] }
+              },
+              "runAfter": {
+                "Try": ["Failed", "TimedOut"]
+              }
+            },
+            "Terminate_Run_As_Failed": {
+              "type": "Terminate",
+              "inputs": {
+                "runStatus": "Failed",
+                "runError": {
+                  "code": "LogicAppScopeFailed",
+                  "message": "Try scope failed; see Notify_* action outputs for details."
+                }
+              },
+              "runAfter": {
+                "Notify_Log_Channel_On_Failure": ["Succeeded", "Failed", "TimedOut"],
+                "Notify_Errors_Channel_On_Failure": ["Succeeded", "Failed", "TimedOut"]
+              }
+            }
+          }
+        },
+        "parameters": {
+          "telegramBotToken": {
+            "value": "[parameters('telegramBotToken')]"
+          }
+        }
+      }
+    }
+  ],
+  "outputs": {
+    "logicAppResourceId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.Logic/workflows', parameters('logicAppName'))]"
+    },
+    "logicAppPrincipalId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Logic/workflows', parameters('logicAppName')), '2019-05-01', 'Full').identity.principalId]",
+      "metadata": {
+        "description": "Assign this principal Contributor role on the ACI resource scope."
+      }
+    },
+    "runnerTriggerCallbackUrl": {
+      "type": "string",
+      "value": "[listCallbackUrl(resourceId('Microsoft.Logic/workflows/triggers', parameters('logicAppName'), 'manual'), '2016-06-01').value]"
+    }
+  }
+}
