@@ -1,0 +1,33 @@
+name: Deploy ACI (locked)
+
+on:
+  push:
+    branches: ['main']
+    paths:
+      - 'infra/aci-locked/**'
+      - '.github/workflows/deploy-aci-locked.yml'
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      RESOURCE_GROUP: f1-fantazy-bot
+      DEPLOYMENT_SUFFIX: ${{ github.run_id }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy locked ACI
+        run: npm run deploy:aci-locked
