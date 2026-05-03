@@ -1,0 +1,184 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "containerGroupName": {
+      "type": "string",
+      "defaultValue": "f1-fantasy-api-data-aci-locked",
+      "metadata": {
+        "description": "Name of the locked-snapshot Azure Container Instance container group."
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Azure region for the container group."
+      }
+    },
+    "containerImage": {
+      "type": "string",
+      "defaultValue": "f1fantasyacr.azurecr.io/f1-fantasy-api-data:latest",
+      "metadata": {
+        "description": "Container image to run in ACI. Same image as the weekly ACI; mode is selected via the MODE env var."
+      }
+    },
+    "cpu": {
+      "type": "string",
+      "defaultValue": "1",
+      "metadata": {
+        "description": "Number of vCPUs assigned to the container."
+      }
+    },
+    "memoryInGb": {
+      "type": "string",
+      "defaultValue": "1.5",
+      "metadata": {
+        "description": "Amount of memory (GB) assigned to the container."
+      }
+    },
+    "restartPolicy": {
+      "type": "string",
+      "defaultValue": "OnFailure",
+      "allowedValues": ["Always", "OnFailure", "Never"],
+      "metadata": {
+        "description": "Container restart policy. Use OnFailure for this one-shot workload."
+      }
+    },
+    "acrServer": {
+      "type": "string",
+      "defaultValue": "f1fantasyacr.azurecr.io",
+      "metadata": {
+        "description": "Azure Container Registry login server."
+      }
+    },
+    "acrUsername": {
+      "type": "string",
+      "defaultValue": "f1fantasyacr",
+      "metadata": {
+        "description": "Azure Container Registry username."
+      }
+    },
+    "acrPassword": {
+      "type": "secureString",
+      "metadata": {
+        "description": "Azure Container Registry password."
+      }
+    },
+    "azureStorageConnectionString": {
+      "type": "secureString",
+      "metadata": {
+        "description": "Azure Storage connection string used by the app."
+      }
+    },
+    "azureStorageContainerName": {
+      "type": "string",
+      "defaultValue": "f1-fantasy-scraper-json",
+      "metadata": {
+        "description": "Blob container name where league data will be uploaded."
+      }
+    },
+    "telegramBotToken": {
+      "type": "secureString",
+      "metadata": {
+        "description": "Telegram bot token for status notifications."
+      }
+    },
+    "f1FantasyEmail": {
+      "type": "secureString",
+      "metadata": {
+        "description": "F1 Fantasy account email for login."
+      }
+    },
+    "f1FantasyPassword": {
+      "type": "secureString",
+      "metadata": {
+        "description": "F1 Fantasy account password for login."
+      }
+    },
+    "f1LeagueCode": {
+      "type": "string",
+      "defaultValue": "C7UYMMWIO07",
+      "metadata": {
+        "description": "F1 Fantasy league code to fetch data for."
+      }
+    },
+    "scrapeMode": {
+      "type": "string",
+      "defaultValue": "locked",
+      "allowedValues": ["weekly", "locked"],
+      "metadata": {
+        "description": "Scrape mode passed to the entry point as MODE. Locked snapshots write only leagues/{code}/locked/matchday_{N}.json."
+      }
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.ContainerInstance/containerGroups",
+      "apiVersion": "2023-05-01",
+      "name": "[parameters('containerGroupName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "osType": "Linux",
+        "restartPolicy": "[parameters('restartPolicy')]",
+        "containers": [
+          {
+            "name": "[parameters('containerGroupName')]",
+            "properties": {
+              "image": "[parameters('containerImage')]",
+              "resources": {
+                "requests": {
+                  "cpu": "[json(parameters('cpu'))]",
+                  "memoryInGB": "[json(parameters('memoryInGb'))]"
+                }
+              },
+              "environmentVariables": [
+                {
+                  "name": "AZURE_STORAGE_CONTAINER_NAME",
+                  "value": "[parameters('azureStorageContainerName')]"
+                },
+                {
+                  "name": "F1_LEAGUE_CODE",
+                  "value": "[parameters('f1LeagueCode')]"
+                },
+                {
+                  "name": "MODE",
+                  "value": "[parameters('scrapeMode')]"
+                },
+                {
+                  "name": "AZURE_STORAGE_CONNECTION_STRING",
+                  "secureValue": "[parameters('azureStorageConnectionString')]"
+                },
+                {
+                  "name": "TELEGRAM_BOT_TOKEN",
+                  "secureValue": "[parameters('telegramBotToken')]"
+                },
+                {
+                  "name": "F1_FANTASY_EMAIL",
+                  "secureValue": "[parameters('f1FantasyEmail')]"
+                },
+                {
+                  "name": "F1_FANTASY_PASSWORD",
+                  "secureValue": "[parameters('f1FantasyPassword')]"
+                }
+              ]
+            }
+          }
+        ],
+        "imageRegistryCredentials": [
+          {
+            "server": "[parameters('acrServer')]",
+            "username": "[parameters('acrUsername')]",
+            "password": "[parameters('acrPassword')]"
+          }
+        ]
+      }
+    }
+  ],
+  "outputs": {
+    "containerGroupResourceId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.ContainerInstance/containerGroups', parameters('containerGroupName'))]"
+    }
+  }
+}

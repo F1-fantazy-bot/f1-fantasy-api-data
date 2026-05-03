@@ -9,7 +9,8 @@ and exits. Deployed as an Azure Container Instance (see `infra/aci/`).
 ```bash
 npm install
 npx playwright install chromium   # required once before first run
-npm start                         # runs index.js end-to-end (needs .env)
+npm start                         # weekly scrape — runs index.js end-to-end (needs .env)
+npm run scrape:locked             # locked-snapshot scrape (sets MODE=locked)
 npm run lint                      # eslint .
 npm run lint:fix
 npm run format                    # prettier --write .
@@ -22,7 +23,24 @@ To iterate on login/scraping with a visible browser, set `F1_HEADLESS=false` in 
 
 ## Architecture
 
-Entry point `index.js` wires four single-responsibility modules in `src/`:
+`index.js` switches on `MODE` env var (default `weekly`):
+
+- `MODE=weekly` → runs `fetchAllLeaguesData()` and uploads
+  `league-standings.json` + `teams-data.json` per league. Used by the
+  Monday Logic App scheduler. **This path is unchanged.**
+- `MODE=locked` → runs `fetchAllLeaguesLocked()` and uploads only
+  `leagues/{code}/locked/matchday_{N}.json`, one blob per (league,
+  matchday). Used by the locked-snapshot Logic App scheduler that fires
+  shortly after each session start (qualifying / race / sprint).
+
+Why two modes: the locked snapshot must be captured between **lock**
+(start of qualifying / sprint qualifying) and **race end**. Once the race
+ends F1 Fantasy auto-reverts Limitless, so a post-race fetch of the same
+matchday would silently overwrite the temporary mega-squad. The Monday
+weekly scrape captures "next-week planning" view (upcoming md = N+1) and
+must keep its current cadence.
+
+Both modes share four single-responsibility modules in `src/`:
 
 1. `f1FantasyApiService.js` — **the only module that talks to F1**. Holds module-level
    `browser` / `context` / `page` / `sessionData` singletons. `init()` launches Chromium,
@@ -72,13 +90,56 @@ totalScore, raceScores, raceBudgets, chipsUsed: [{ name, gameDayId }] }`.
      fetch per matchday.
 3. `azureBlobStorageService.js` — uploads to
    `leagues/<leagueCode>/<blobName>` in the configured container. `blobName`
-   defaults to `league-standings.json`; `index.js` also uploads
-   `teams-data.json` per league. Skipped entirely when
-   `AZURE_STORAGE_CONNECTION_STRING` is unset (useful for local dry runs).
+   defaults to `league-standings.json`; the weekly path also uploads
+   `teams-data.json` per league, and the locked path uploads
+   `locked/matchday_{N}.json` per league per locked matchday. Skipped
+   entirely when `AZURE_STORAGE_CONNECTION_STRING` is unset (useful for
+   local dry runs).
 4. `telegramService.js` — singleton instance (`module.exports = new TelegramService()`).
-   Sends success to `LOG_CHANNEL_ID`, errors to **both** log and errors channels.
-   Messages to those channels are auto-prefixed with `F1_FANTASY_API: `. No-ops with a
-   warning if `TELEGRAM_BOT_TOKEN` is missing.
+   Sends success to `LOG_CHANNEL_ID` (with separate `notifySuccess` /
+   `notifySuccessLocked` messages so the channel makes the mode obvious),
+   errors to **both** log and errors channels. Messages to those channels
+   are auto-prefixed with `F1_FANTASY_API: `. No-ops with a warning if
+   `TELEGRAM_BOT_TOKEN` is missing.
+
+5. `fetchLockedLeagueData.js` — locked-snapshot orchestration. Mirrors a
+   minimal subset of `fetchLeagueData.js`: for each private league it
+   calls `getLeagueLeaderboard`, then for each team uses
+   `getOpponentGameDays(guid, teamNo, /* v */ teamNo)` to find the
+   latest matchday in `mdDetails` and probes
+   `getOpponentTeam(guid, md, { teamNo, v: teamNo })` first for
+   `lastInDetails + 1` (between weekends) and falls back to
+   `lastInDetails` (during a weekend after the first sub-event scored
+   — typically a sprint that already completed). The first matchday
+   with a valid `team_info.teamVal` plus non-empty `playerid` array is
+   taken as the locked one. **The `v` parameter is the team_no
+   disambiguator** — it's the only parameter that selects WHICH of an
+   opponent's multiple F1 Fantasy teams is returned. The path-level
+   `{teamNo}` is empirically ignored when querying opponents (it
+   represents the caller's perspective). For users with only one team
+   the difference is invisible (default `v=1` works); for users with
+   multiple teams (e.g. `dorsegal1/2/3` with `team_no` 1/2/3 in the
+   same league) we MUST pass `v: entry.team_no` or all three teams
+   collapse onto whichever roster `v=1` yields. Resolves the roster
+   via `rosterService`, extracts chips via `chips.js`, and returns
+   one snapshot per team. Snapshots are grouped by `matchdayId` so
+   each league produces one blob per locked matchday. Per-team
+   failures are logged and skipped. Output blob shape:
+   ```jsonc
+   {
+     "fetchedAt":   "<ISO>",
+     "mode":        "locked",
+     "leagueName":  "...", "leagueCode": "...", "leagueId": 1,
+     "matchdayId":  4,
+     "teams": [
+       { "teamName":"...", "userName":"...", "position":1,
+         "matchdayId":4, "budget":107.8, "transfersRemaining":0,
+         "drivers":[{id,name,price,isCaptain,isMegaCaptain,isFinal}],
+         "constructors":[…],
+         "chipsUsed":[{name,gameDayId}] }
+     ]
+   }
+   ```
 
 ### How API calls actually work
 
@@ -120,16 +181,67 @@ built-in `pwuser`. If you bump `playwright` in `package.json`, bump the base ima
 in `Dockerfile` to match — version skew between the Playwright client and the bundled
 browsers will break login.
 
+The pipeline ships **two parallel deployment stacks** that share one Docker image
+but have completely independent Azure resources so neither can disrupt the other.
+
+### Weekly stack (default — drives `league-standings.json` + `teams-data.json`)
+
 ACI deployment uses `infra/aci/azuredeploy.json` + `azuredeploy.parameters.json`. Logic
 Apps (runner + scheduler) live under `infra/runner/` and `infra/scheduler/`. The runner
 Logic App uses a system-assigned identity to call the ACI `/start` endpoint, so it needs
 Contributor on the ACI — `scripts/grant-runner-msi.sh` handles that idempotently and is
 wired into `npm run deploy:logicapps` between `deploy:runner` and `deploy:scheduler`.
+The scheduler fires every Monday 03:00 UTC.
+
+### Locked-snapshot stack (drives `leagues/{code}/locked/matchday_{N}.json`)
+
+Mirror of the weekly stack with `-locked` suffixes. Mode is selected via the `MODE`
+env var baked into the ACI deployment (`scrapeMode: "locked"`), so the same image
+runs the locked path without command overrides.
+
+- `infra/aci-locked/` — second ACI container group (`f1-fantasy-api-data-aci-locked`),
+  same Key Vault references as weekly, plus `MODE=locked` in `environmentVariables`.
+- `infra/runner-locked/` — runner Logic App (`f1-fantasy-api-data-runner-locked`)
+  pointing at the locked ACI. The MSI grant is reused via
+  `LOGIC_APP_NAME=… ACI_NAME=… bash scripts/grant-runner-msi.sh` (see
+  `deploy:grant-runner-msi-locked`).
+- `infra/scheduler-locked/` — calendar-aware scheduler Logic App
+  (`f1-fantasy-api-data-scheduler-locked`). Recurrence trigger fires every hour at
+  `:01` UTC. On each pulse it:
+    1. HTTP GETs `https://api.jolpi.ca/ergast/f1/current/next.json` (Jolpica/Ergast
+       proxy of the next race in the current season).
+    2. Computes the current top-of-hour as `concat(formatDateTime(startOfHour(utcNow()), 'yyyy-MM-ddTHH:mm:ss'), 'Z')`.
+    3. Builds candidate session-start strings as `date + 'T' + time` for
+       `Qualifying`, `Sprint` (sprint weekends only), and the race itself.
+    4. If top-of-hour equals any candidate → POSTs the runner-locked manual trigger
+       and notifies the log channel; otherwise no-op.
+
+  Why hourly @ X:01: F1 sessions always start on the hour (HH:00:00Z in the Jolpica
+  schema), so equality on top-of-hour is sufficient. Firing at X:01 means the runner
+  fires ~1 minute after the session starts. Idempotency: the locked scrape writes
+  `matchday_N.json` deterministically, so a duplicate fire is safe.
+
+  Why match `Sprint` (the sprint race) and not `SprintQualifying`: by the time the
+  sprint race starts on Saturday the F1 Fantasy sprint lock has been in effect since
+  the start of sprint qualifying on Friday, so the locked roster is already
+  capturable. SprintQualifying also doesn't always start on the hour
+  (e.g. `20:30:00Z`), which our top-of-hour matcher would miss.
+
+Deploy commands:
+- `npm run deploy:locked` — full locked stack (ACI + runner + grant + scheduler).
+- Individual: `deploy:aci-locked`, `deploy:runner-locked`,
+  `deploy:grant-runner-msi-locked`, `deploy:scheduler-locked`.
+- `deploy:logicapps-locked` — runner + grant + scheduler only (skips ACI).
 
 GitHub Actions workflows in `.github/workflows/` build/push the image
-(`docker-build-push.yml`), deploy infra on changes to `infra/**` or the grant script
-(`deploy-infra.yml`, runs `deploy:aci` then `deploy:logicapps`), and send Telegram
-notifications on commits and PRs.
+(`docker-build-push.yml`); deploy the weekly stack on changes to
+`infra/aci/**`, `infra/runner/**`, `infra/scheduler/**`, or the grant script
+(`deploy-aci.yml` + `deploy-logicapps.yml`); and deploy the locked stack on
+changes to `infra/aci-locked/**`, `infra/runner-locked/**`,
+`infra/scheduler-locked/**`, or the grant script (`deploy-aci-locked.yml`
++ `deploy-logicapps-locked.yml`). All four deploy workflows also support
+`workflow_dispatch` for manual triggering. Telegram notifications fire on
+commits and PRs.
 
 ## update your instructions
 
