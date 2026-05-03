@@ -89,7 +89,15 @@ async function _fetchLockedTeamSnapshot(entry, teamName) {
 
   let oppData;
   try {
-    oppData = await f1Api.getOpponentGameDays(entry.user_guid, teamNo);
+    // The `v` parameter on opponent endpoints is the **team_no
+    // disambiguator** for users with multiple F1 Fantasy teams in a
+    // league. The path-level `teamNo` is empirically ignored when
+    // querying opponents (it represents the caller's perspective);
+    // only `v` selects which of the opponent's teams to return. Pass
+    // `entry.team_no` as `v` so a user with 3 teams (e.g. Dor Segal's
+    // dorsegal1/2/3 with team_no 1/2/3) returns 3 distinct rosters
+    // instead of collapsing onto whichever team v=1 yields.
+    oppData = await f1Api.getOpponentGameDays(entry.user_guid, teamNo, teamNo);
   } catch (err) {
     console.log(`   ⚠️ Could not fetch game days for ${teamName}: ${err.message}`);
 
@@ -117,43 +125,29 @@ async function _fetchLockedTeamSnapshot(entry, teamName) {
   // (no playerid, no teamVal) it means that matchday hasn't been locked yet,
   // and the currently-in-progress weekend is lastInDetails.
   //
-  // For each candidate matchday we also probe the v parameter: v=3 returns
-  // the GP-locked roster on sprint weekends, v=1 returns the sprint-locked
-  // roster (or the only lock on non-sprint weekends). For users who made
-  // transfers between Sprint Qualifying and Race Qualifying the two states
-  // differ; for users who didn't, v=3 returns an empty state and we need
-  // to fall back to v=1. So the priority order is:
-  //   md=lastInDetails+1, v=3   — between weekends, GP-lock if a sprint just played
-  //   md=lastInDetails+1, v=1   — between weekends, the canonical lock
-  //   md=lastInDetails,   v=3   — currently-in-progress weekend, GP-lock
-  //   md=lastInDetails,   v=1   — currently-in-progress weekend, fallback
-  // First valid response wins. (See scripts/diag-locked-roster-params.js
-  // for the empirical investigation that established v=3 / v=1 semantics;
-  // v2 is irrelevant.)
+  // The `v` parameter is the team_no disambiguator (see getOpponentGameDays
+  // call above for the same logic).
   const candidateMatchdays = [lastInDetails + 1, lastInDetails];
-  const candidateVs = [3, 1];
   let teamData = null;
   let lockedMatchdayId = null;
 
-  outer: for (const md of candidateMatchdays) {
-    for (const v of candidateVs) {
-      let resp;
-      try {
-        resp = await f1Api.getOpponentTeam(entry.user_guid, md, {
-          teamNo,
-          v,
-        });
-      } catch (err) {
-        console.log(
-          `   ⚠️ getOpponentTeam(${md}, v=${v}) failed for ${teamName}: ${err.message}`,
-        );
-        continue;
-      }
-      if (_isValidTeamState(resp)) {
-        teamData = resp;
-        lockedMatchdayId = md;
-        break outer;
-      }
+  for (const md of candidateMatchdays) {
+    let resp;
+    try {
+      resp = await f1Api.getOpponentTeam(entry.user_guid, md, {
+        teamNo,
+        v: teamNo,
+      });
+    } catch (err) {
+      console.log(
+        `   ⚠️ getOpponentTeam(${md}, v=${teamNo}) failed for ${teamName}: ${err.message}`,
+      );
+      continue;
+    }
+    if (_isValidTeamState(resp)) {
+      teamData = resp;
+      lockedMatchdayId = md;
+      break;
     }
   }
 
