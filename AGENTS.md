@@ -106,15 +106,26 @@ totalScore, raceScores, raceBudgets, chipsUsed: [{ name, gameDayId }] }`.
    minimal subset of `fetchLeagueData.js`: for each private league it
    calls `getLeagueLeaderboard`, then for each team uses
    `getOpponentGameDays` to find the latest matchday in `mdDetails` and
-   probes `getOpponentTeam` first for `lastInDetails + 1` (between
-   weekends) and falls back to `lastInDetails` (during a weekend after
-   the first sub-event scored — typically a sprint that already
-   completed). The first matchday with a valid `team_info.teamVal` plus
-   non-empty `playerid` array is taken as the locked one. Resolves the
-   roster via `rosterService`, extracts chips via `chips.js`, and
-   returns one snapshot per team. Snapshots are grouped by `matchdayId`
-   so each league produces one blob per locked matchday. Per-team
-   failures are logged and skipped. Output blob shape:
+   probes `getOpponentTeam(guid, md, { teamNo, v })` for `md ∈
+   {lastInDetails + 1, lastInDetails}` and `v ∈ {3, 1}` — first valid
+   response wins. **The `v` parameter selects which locked state to
+   return on sprint weekends:** F1 Fantasy stores both a sprint-locked
+   roster (Friday SQ lock, returned by `v=1`) and a GP-locked roster
+   (Saturday race-quali lock, returned by `v=3`). For users who made
+   transfers between sprint and race quali the two states differ; we
+   try `v=3` first to get the GP roster, and fall back to `v=1` for
+   users who didn't make transfers between sprint and race quali (in
+   which case `v=3` returns an empty state and `v=1` is their canonical
+   lock). On non-sprint weekends only one lock exists so the two `v`
+   values converge. The companion `v2` parameter has no observable
+   effect (see `scripts/diag-locked-roster-params.js` in git history
+   for the empirical investigation that established this). The first
+   matchday with a valid `team_info.teamVal` plus non-empty `playerid`
+   array is taken as the locked one. Resolves the roster via
+   `rosterService`, extracts chips via `chips.js`, and returns one
+   snapshot per team. Snapshots are grouped by `matchdayId` so each
+   league produces one blob per locked matchday. Per-team failures are
+   logged and skipped. Output blob shape:
    ```jsonc
    {
      "fetchedAt":   "<ISO>",
