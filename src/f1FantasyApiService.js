@@ -276,12 +276,30 @@ async function getFeaturedLeagues() {
   return _apiGet(`/services/user/league/${_guid()}/featuredleaguev1`);
 }
 
-/** Get opponent's game days */
+/**
+ * Get opponent's game days (per-matchday scores + chip flags).
+ *
+ * `v` is the **team_no disambiguator** for opponents who have
+ * multiple F1 Fantasy teams in the league (the path-level `teamNo`
+ * is empirically ignored when fetching opponent data — it represents
+ * the caller's perspective). Pass the opponent's `team_no` as `v`
+ * to fetch THAT specific team's data. Default `v=1` returns the
+ * opponent's first team and is correct for users with only one team.
+ */
 async function getOpponentGameDays(opponentGuid, teamNo = 1, v = 1) {
   return _apiGet(`/services/user/opponentteam/opponentgamedayget/${teamNo}/${opponentGuid}/${v}`);
 }
 
-/** Get opponent's team for a specific matchday */
+/**
+ * Get opponent's team for a specific matchday.
+ *
+ * `v` is the **team_no disambiguator** for opponents who have
+ * multiple F1 Fantasy teams in the league. The path-level `teamNo`
+ * is empirically ignored for opponent fetches; only `v` selects
+ * which of the opponent's teams to return. Pass the opponent's
+ * `team_no` as `v`. Default `v=1` returns the opponent's first
+ * team. `v2` has no observable effect.
+ */
 async function getOpponentTeam(opponentGuid, matchdayId, { teamNo = 1, v = 1, v2 = 1 } = {}) {
   return _apiGet(
     `/services/user/opponentteam/opponentgamedayplayerteamget/${teamNo}/${opponentGuid}/${v}/${matchdayId}/${v2}`,

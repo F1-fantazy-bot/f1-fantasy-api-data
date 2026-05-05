@@ -57,8 +57,12 @@ function _isValidTeamState(teamData) {
 }
 
 async function _fetchTeamStateWithFallback(guid, teamNo, preferredMdid, fallbackMdid, teamName) {
+  // The `v` parameter on getOpponentTeam is the team_no disambiguator;
+  // the path-level `teamNo` is empirically ignored when fetching
+  // opponents. Pass `teamNo` as `v` so a user with multiple teams
+  // returns each one's distinct roster instead of collapsing onto v=1.
   try {
-    const teamData = await f1Api.getOpponentTeam(guid, preferredMdid, { teamNo });
+    const teamData = await f1Api.getOpponentTeam(guid, preferredMdid, { teamNo, v: teamNo });
 
     if (_isValidTeamState(teamData)) {
       return { teamData, matchdayId: preferredMdid };
@@ -68,7 +72,7 @@ async function _fetchTeamStateWithFallback(guid, teamNo, preferredMdid, fallback
   }
 
   try {
-    const teamData = await f1Api.getOpponentTeam(guid, fallbackMdid, { teamNo });
+    const teamData = await f1Api.getOpponentTeam(guid, fallbackMdid, { teamNo, v: teamNo });
 
     if (_isValidTeamState(teamData)) {
       console.log(`   ⚠️ Using completed matchday ${fallbackMdid} for ${teamName} (upcoming unavailable)`);
@@ -168,7 +172,10 @@ async function fetchSingleLeague(leagueCode) {
     let completedMatchdayIds = [];
 
     try {
-      const oppData = await f1Api.getOpponentGameDays(entry.user_guid, teamNo);
+      // v = teamNo so a user with multiple teams returns each one's
+      // distinct mdDetails / chip flags. See _fetchTeamStateWithFallback
+      // for the full explanation.
+      const oppData = await f1Api.getOpponentGameDays(entry.user_guid, teamNo, teamNo);
       const mdDetails = oppData?.mdDetails || {};
 
       for (const [matchdayId, details] of Object.entries(mdDetails)) {
@@ -245,7 +252,7 @@ async function fetchSingleLeague(leagueCode) {
 
     for (const mdid of missingMdIds) {
       try {
-        const teamData = await f1Api.getOpponentTeam(entry.user_guid, mdid, { teamNo });
+        const teamData = await f1Api.getOpponentTeam(entry.user_guid, mdid, { teamNo, v: teamNo });
         const val = extractStartBudget(teamData);
 
         if (val !== null) {

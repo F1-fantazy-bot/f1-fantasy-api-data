@@ -1,0 +1,79 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "containerGroupName": {
+      "value": "f1-fantasy-api-data-aci-locked"
+    },
+    "location": {
+      "value": "westeurope"
+    },
+    "containerImage": {
+      "value": "f1fantasyacr.azurecr.io/f1-fantasy-api-data:latest"
+    },
+    "cpu": {
+      "value": "1"
+    },
+    "memoryInGb": {
+      "value": "1.5"
+    },
+    "restartPolicy": {
+      "value": "OnFailure"
+    },
+    "acrServer": {
+      "value": "f1fantasyacr.azurecr.io"
+    },
+    "acrUsername": {
+      "value": "f1fantasyacr"
+    },
+    "azureStorageContainerName": {
+      "value": "f1-fantasy-scraper-json"
+    },
+    "f1LeagueCode": {
+      "value": "C7UYMMWIO07"
+    },
+    "scrapeMode": {
+      "value": "locked"
+    },
+    "acrPassword": {
+      "reference": {
+        "keyVault": {
+          "id": "/subscriptions/5cfc4033-d828-4bdb-b9ea-de042e483715/resourceGroups/f1-fantazy-bot/providers/Microsoft.KeyVault/vaults/f1-fantasy-kv"
+        },
+        "secretName": "acr-password"
+      }
+    },
+    "azureStorageConnectionString": {
+      "reference": {
+        "keyVault": {
+          "id": "/subscriptions/5cfc4033-d828-4bdb-b9ea-de042e483715/resourceGroups/f1-fantazy-bot/providers/Microsoft.KeyVault/vaults/f1-fantasy-kv"
+        },
+        "secretName": "azure-storage-connection-string"
+      }
+    },
+    "telegramBotToken": {
+      "reference": {
+        "keyVault": {
+          "id": "/subscriptions/5cfc4033-d828-4bdb-b9ea-de042e483715/resourceGroups/f1-fantazy-bot/providers/Microsoft.KeyVault/vaults/f1-fantasy-kv"
+        },
+        "secretName": "telegram-bot-token"
+      }
+    },
+    "f1FantasyEmail": {
+      "reference": {
+        "keyVault": {
+          "id": "/subscriptions/5cfc4033-d828-4bdb-b9ea-de042e483715/resourceGroups/f1-fantazy-bot/providers/Microsoft.KeyVault/vaults/f1-fantasy-kv"
+        },
+        "secretName": "f1-fantasy-email"
+      }
+    },
+    "f1FantasyPassword": {
+      "reference": {
+        "keyVault": {
+          "id": "/subscriptions/5cfc4033-d828-4bdb-b9ea-de042e483715/resourceGroups/f1-fantazy-bot/providers/Microsoft.KeyVault/vaults/f1-fantasy-kv"
+        },
+        "secretName": "f1-fantasy-password"
+      }
+    }
+  }
+}

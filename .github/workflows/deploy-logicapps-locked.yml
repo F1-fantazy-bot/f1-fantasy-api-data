@@ -1,14 +1,14 @@
-name: Deploy Logic Apps
+name: Deploy Logic Apps (locked)
 
 on:
   push:
     branches: ['main']
     paths:
       - 'infra/runner/azuredeploy.json'
-      - 'infra/runner/azuredeploy.parameters.json'
-      - 'infra/scheduler/**'
+      - 'infra/runner/azuredeploy.locked.parameters.json'
+      - 'infra/scheduler-locked/**'
       - 'scripts/grant-runner-msi.sh'
-      - '.github/workflows/deploy-logicapps.yml'
+      - '.github/workflows/deploy-logicapps-locked.yml'
   workflow_dispatch:
 
 permissions:
@@ -32,5 +32,5 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Deploy Logic Apps (runner -> grant MSI -> scheduler)
-        run: npm run deploy:logicapps
+      - name: Deploy locked Logic Apps (runner -> grant MSI -> scheduler)
+        run: npm run deploy:logicapps-locked

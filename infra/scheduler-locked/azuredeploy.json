@@ -1,0 +1,235 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "logicAppName": {
+      "type": "string",
+      "defaultValue": "f1-fantasy-api-data-scheduler-locked",
+      "metadata": {
+        "description": "Name of the locked-snapshot scheduler Logic App resource."
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Azure region for the Logic App."
+      }
+    },
+    "runnerLogicAppName": {
+      "type": "string",
+      "defaultValue": "f1-fantasy-api-data-runner-locked",
+      "metadata": {
+        "description": "Name of the locked-snapshot runner Logic App to trigger when a session starts."
+      }
+    },
+    "raceScheduleEndpoint": {
+      "type": "string",
+      "defaultValue": "https://api.jolpi.ca/ergast/f1/current/next.json",
+      "metadata": {
+        "description": "Public Jolpica/Ergast endpoint that returns the next upcoming race for the current season."
+      }
+    },
+    "telegramBotToken": {
+      "type": "secureString",
+      "metadata": {
+        "description": "Telegram bot token used to post Logic App failure notifications."
+      }
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Logic/workflows",
+      "apiVersion": "2019-05-01",
+      "name": "[parameters('logicAppName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "state": "Enabled",
+        "definition": {
+          "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+          "contentVersion": "1.0.0.0",
+          "parameters": {
+            "telegramBotToken": { "type": "SecureString" },
+            "raceScheduleEndpoint": { "type": "String" }
+          },
+          "triggers": {
+            "Every_Hour_At_01": {
+              "type": "Recurrence",
+              "recurrence": {
+                "frequency": "Hour",
+                "interval": 1,
+                "schedule": {
+                  "minutes": [1]
+                },
+                "timeZone": "UTC"
+              }
+            }
+          },
+          "actions": {
+            "Try": {
+              "type": "Scope",
+              "actions": {
+                "Get_Next_Race": {
+                  "type": "Http",
+                  "inputs": {
+                    "method": "GET",
+                    "uri": "@parameters('raceScheduleEndpoint')",
+                    "headers": { "Accept": "application/json" }
+                  },
+                  "runAfter": {}
+                },
+                "Compose_Race": {
+                  "type": "Compose",
+                  "inputs": "@first(coalesce(body('Get_Next_Race')?['MRData']?['RaceTable']?['Races'], json('[]')))",
+                  "runAfter": { "Get_Next_Race": ["Succeeded"] }
+                },
+                "Compose_TopOfHour": {
+                  "type": "Compose",
+                  "inputs": "@concat(formatDateTime(startOfHour(utcNow()), 'yyyy-MM-ddTHH:mm:ss'), 'Z')",
+                  "runAfter": { "Compose_Race": ["Succeeded"] }
+                },
+                "Compose_Quali_Start": {
+                  "type": "Compose",
+                  "inputs": "@concat(coalesce(outputs('Compose_Race')?['Qualifying']?['date'], ''), 'T', coalesce(outputs('Compose_Race')?['Qualifying']?['time'], ''))",
+                  "runAfter": { "Compose_TopOfHour": ["Succeeded"] }
+                },
+                "Compose_Sprint_Start": {
+                  "type": "Compose",
+                  "inputs": "@concat(coalesce(outputs('Compose_Race')?['Sprint']?['date'], ''), 'T', coalesce(outputs('Compose_Race')?['Sprint']?['time'], ''))",
+                  "runAfter": { "Compose_Quali_Start": ["Succeeded"] }
+                },
+                "Compose_Race_Start": {
+                  "type": "Compose",
+                  "inputs": "@concat(coalesce(outputs('Compose_Race')?['date'], ''), 'T', coalesce(outputs('Compose_Race')?['time'], ''))",
+                  "runAfter": { "Compose_Sprint_Start": ["Succeeded"] }
+                },
+                "If_Session_Just_Started": {
+                  "type": "If",
+                  "expression": {
+                    "or": [
+                      {
+                        "equals": [
+                          "@outputs('Compose_TopOfHour')",
+                          "@outputs('Compose_Quali_Start')"
+                        ]
+                      },
+                      {
+                        "equals": [
+                          "@outputs('Compose_TopOfHour')",
+                          "@outputs('Compose_Sprint_Start')"
+                        ]
+                      },
+                      {
+                        "equals": [
+                          "@outputs('Compose_TopOfHour')",
+                          "@outputs('Compose_Race_Start')"
+                        ]
+                      }
+                    ]
+                  },
+                  "actions": {
+                    "Trigger_Locked_Runner": {
+                      "type": "Http",
+                      "inputs": {
+                        "method": "POST",
+                        "uri": "[listCallbackUrl(resourceId('Microsoft.Logic/workflows/triggers', parameters('runnerLogicAppName'), 'manual'), '2016-06-01').value]"
+                      },
+                      "runAfter": {}
+                    },
+                    "Notify_Log_Channel_Triggered": {
+                      "type": "Http",
+                      "inputs": {
+                        "method": "POST",
+                        "uri": "@{concat('https://api.telegram.org/bot', parameters('telegramBotToken'), '/sendMessage')}",
+                        "headers": { "Content-Type": "application/json" },
+                        "body": {
+                          "chat_id": -1002298860617,
+                          "text": "@{concat('🔒 F1_FANTASY_API: locked-snapshot runner triggered\nMatched session start: ', outputs('Compose_TopOfHour'), '\nRace: ', coalesce(outputs('Compose_Race')?['raceName'], '?'), ' R', coalesce(outputs('Compose_Race')?['round'], '?'))}"
+                        }
+                      },
+                      "runtimeConfiguration": {
+                        "secureData": { "properties": ["inputs", "outputs"] }
+                      },
+                      "runAfter": {
+                        "Trigger_Locked_Runner": ["Succeeded"]
+                      }
+                    }
+                  },
+                  "else": {
+                    "actions": {}
+                  },
+                  "runAfter": { "Compose_Race_Start": ["Succeeded"] }
+                }
+              },
+              "runAfter": {}
+            },
+            "Notify_Log_Channel_On_Failure": {
+              "type": "Http",
+              "inputs": {
+                "method": "POST",
+                "uri": "@{concat('https://api.telegram.org/bot', parameters('telegramBotToken'), '/sendMessage')}",
+                "headers": { "Content-Type": "application/json" },
+                "body": {
+                  "chat_id": -1002298860617,
+                  "text": "@{concat('🚨 Logic App ', workflow().name, ' failed\n\nRun: ', workflow().run.name, '\nTime (UTC): ', utcNow(), '\n\nFailed actions:\n', take(string(result('Try')), 3500))}"
+                }
+              },
+              "runtimeConfiguration": {
+                "secureData": { "properties": ["inputs", "outputs"] }
+              },
+              "runAfter": {
+                "Try": ["Failed", "TimedOut"]
+              }
+            },
+            "Notify_Errors_Channel_On_Failure": {
+              "type": "Http",
+              "inputs": {
+                "method": "POST",
+                "uri": "@{concat('https://api.telegram.org/bot', parameters('telegramBotToken'), '/sendMessage')}",
+                "headers": { "Content-Type": "application/json" },
+                "body": {
+                  "chat_id": -5167373779,
+                  "text": "@{concat('🚨 Logic App ', workflow().name, ' failed\n\nRun: ', workflow().run.name, '\nTime (UTC): ', utcNow(), '\n\nFailed actions:\n', take(string(result('Try')), 3500))}"
+                }
+              },
+              "runtimeConfiguration": {
+                "secureData": { "properties": ["inputs", "outputs"] }
+              },
+              "runAfter": {
+                "Try": ["Failed", "TimedOut"]
+              }
+            },
+            "Terminate_Run_As_Failed": {
+              "type": "Terminate",
+              "inputs": {
+                "runStatus": "Failed",
+                "runError": {
+                  "code": "LogicAppScopeFailed",
+                  "message": "Try scope failed; see Notify_* action outputs for details."
+                }
+              },
+              "runAfter": {
+                "Notify_Log_Channel_On_Failure": ["Succeeded", "Failed", "TimedOut"],
+                "Notify_Errors_Channel_On_Failure": ["Succeeded", "Failed", "TimedOut"]
+              }
+            }
+          }
+        },
+        "parameters": {
+          "telegramBotToken": {
+            "value": "[parameters('telegramBotToken')]"
+          },
+          "raceScheduleEndpoint": {
+            "value": "[parameters('raceScheduleEndpoint')]"
+          }
+        }
+      }
+    }
+  ],
+  "outputs": {
+    "logicAppResourceId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.Logic/workflows', parameters('logicAppName'))]"
+    }
+  }
+}

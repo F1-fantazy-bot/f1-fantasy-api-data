@@ -5,10 +5,26 @@ fetches league leaderboard data through the API, and uploads it to Azure Blob St
 
 ## How It Works
 
-1. **Login** — Launches a headless Chromium browser via Playwright, navigates to the F1 account login page, and authenticates (required to bypass Distil bot detection).
-2. **Fetch Data** — After login, calls the F1 Fantasy API endpoints using `page.evaluate(fetch(...))` to get league standings, team data, per-race scores, chips used, remaining budget, transfers left, and each team's roster of drivers and constructors.
-3. **Upload** — Saves two JSON blobs per league to Azure Blob Storage: `league-standings.json` (leaderboard, per-race scores, chips used) and `teams-data.json` (per-team budget, transfers, and roster).
-4. **Notify** — Sends a Telegram notification on success or failure, then exits.
+The container has two modes, switched via the `MODE` env var:
+
+- **`MODE=weekly`** (default — `npm start`) — Logs in, fetches every private
+  league's leaderboard + each team's per-matchday scores, current roster,
+  budget, transfers, and chips used. Writes two blobs per league:
+  `leagues/{code}/league-standings.json` (history + chips) and
+  `leagues/{code}/teams-data.json` (current roster snapshot for the
+  upcoming matchday). Designed to run **once a week, after the race
+  weekend** (Monday Logic App scheduler).
+
+- **`MODE=locked`** (`npm run scrape:locked`) — Captures the **just-locked**
+  matchday's roster, captain, budget, transfers and chips for every team.
+  Writes only `leagues/{code}/locked/matchday_{N}.json`, one blob per
+  league per locked matchday. Designed to run shortly after each
+  qualifying / sprint / race start (the F1 Fantasy lock fires at session
+  start). Must complete before the race ends — once the race ends F1
+  Fantasy auto-reverts Limitless and the locked mega-squad would be lost.
+
+Both modes share login, F1 API access, roster resolution, and Telegram
+notifications.
 
 ## Setup
 
@@ -17,7 +33,8 @@ cp .env.example .env
 # Fill in credentials
 npm install
 npx playwright install chromium
-npm start
+npm start                    # weekly mode
+npm run scrape:locked        # locked-snapshot mode
 ```
 
 ## Environment Variables

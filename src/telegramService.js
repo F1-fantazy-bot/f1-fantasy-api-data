@@ -51,6 +51,34 @@ Fetched at: ${new Date().toISOString()}`;
     await this.sendMessage(message, LOG_CHANNEL_ID);
   }
 
+  async notifySuccessLocked(allLeagues) {
+    const list = Array.isArray(allLeagues) ? allLeagues : [allLeagues];
+    const leagueLines = list
+      .map(({ league, blobs }) => {
+        const matchdays = (blobs || [])
+          .map((b) => b.payload?.matchdayId)
+          .filter((m) => m !== undefined && m !== null);
+        const mdSummary = matchdays.length
+          ? `md ${matchdays.join(', ')}`
+          : 'no md';
+
+        return `• ${league.leagueName} (${mdSummary}, ${(blobs || []).length} blob)`;
+      })
+      .join('\n');
+    const totalBlobs = list.reduce(
+      (acc, r) => acc + ((r.blobs || []).length),
+      0,
+    );
+
+    const message = `🔒 *Locked-snapshot data fetched successfully*
+Leagues: ${list.length}
+Locked-matchday blobs: ${totalBlobs}
+${leagueLines}
+Fetched at: ${new Date().toISOString()}`;
+
+    await this.sendMessage(message, LOG_CHANNEL_ID);
+  }
+
   async notifyError(error) {
     const message = `❌ *Error fetching league data*
 ${error.message}`;
