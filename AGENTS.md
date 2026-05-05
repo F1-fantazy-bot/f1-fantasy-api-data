@@ -214,7 +214,9 @@ files differ:
 - Scheduler: `infra/scheduler-locked/` is its **own template** — calendar-aware
   scheduler Logic App (`f1-fantasy-api-data-scheduler-locked`) with logic that
   has no overlap with the weekly Monday cron, so it stays separate. Recurrence
-  trigger fires every hour at `:01` UTC. On each pulse it:
+  trigger fires every hour at `:01` UTC, **Friday through Sunday only** —
+  F1 race weekends are always Fri–Sun, so it's wasteful to poll Mon–Thu.
+  On each pulse it:
     1. HTTP GETs `https://api.jolpi.ca/ergast/f1/current/next.json` (Jolpica/Ergast
        proxy of the next race in the current season).
     2. Computes the current top-of-hour as `concat(formatDateTime(startOfHour(utcNow()), 'yyyy-MM-ddTHH:mm:ss'), 'Z')`.
@@ -223,9 +225,12 @@ files differ:
     4. If top-of-hour equals any candidate → POSTs the runner-locked manual trigger
        and notifies the log channel; otherwise no-op.
 
-  Why hourly @ X:01: F1 sessions always start on the hour (HH:00:00Z in the Jolpica
-  schema), so equality on top-of-hour is sufficient. Firing at X:01 means the runner
-  fires ~1 minute after the session starts. Idempotency: the locked scrape writes
+  Why hourly @ X:01 on weekends: F1 sessions always start on the hour
+  (HH:00:00Z in the Jolpica schema), so equality on top-of-hour is sufficient.
+  Firing at X:01 means the runner fires ~1 minute after the session starts.
+  Friday–Sunday window covers qualifying (typically Fri–Sat), sprint
+  qualifying / sprint race (Fri–Sat on sprint weekends) and the race
+  itself (Sun, occasionally Sat). Idempotency: the locked scrape writes
   `matchday_N.json` deterministically, so a duplicate fire is safe.
 
   Why match `Sprint` (the sprint race) and not `SprintQualifying`: by the time the
