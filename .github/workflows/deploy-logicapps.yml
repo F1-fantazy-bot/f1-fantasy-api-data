@@ -4,7 +4,8 @@ on:
   push:
     branches: ['main']
     paths:
-      - 'infra/runner/**'
+      - 'infra/runner/azuredeploy.json'
+      - 'infra/runner/azuredeploy.parameters.json'
       - 'infra/scheduler/**'
       - 'scripts/grant-runner-msi.sh'
       - '.github/workflows/deploy-logicapps.yml'

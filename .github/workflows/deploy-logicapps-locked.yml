@@ -4,7 +4,8 @@ on:
   push:
     branches: ['main']
     paths:
-      - 'infra/runner-locked/**'
+      - 'infra/runner/azuredeploy.json'
+      - 'infra/runner/azuredeploy.locked.parameters.json'
       - 'infra/scheduler-locked/**'
       - 'scripts/grant-runner-msi.sh'
       - '.github/workflows/deploy-logicapps-locked.yml'

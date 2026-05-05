@@ -4,7 +4,8 @@ on:
   push:
     branches: ['main']
     paths:
-      - 'infra/aci-locked/**'
+      - 'infra/aci/azuredeploy.json'
+      - 'infra/aci/azuredeploy.locked.parameters.json'
       - '.github/workflows/deploy-aci-locked.yml'
   workflow_dispatch:
 

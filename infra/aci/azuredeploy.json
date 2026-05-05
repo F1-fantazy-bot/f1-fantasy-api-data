@@ -102,6 +102,14 @@
       "metadata": {
         "description": "F1 Fantasy league code to fetch data for."
       }
+    },
+    "scrapeMode": {
+      "type": "string",
+      "defaultValue": "weekly",
+      "allowedValues": ["weekly", "locked"],
+      "metadata": {
+        "description": "Scrape mode passed to the entry point as MODE. 'weekly' runs the standard scrape; 'locked' writes only leagues/{code}/locked/matchday_{N}.json."
+      }
     }
   },
   "resources": [
@@ -125,6 +133,10 @@
                 }
               },
               "environmentVariables": [
+                {
+                  "name": "MODE",
+                  "value": "[parameters('scrapeMode')]"
+                },
                 {
                   "name": "AZURE_STORAGE_CONTAINER_NAME",
                   "value": "[parameters('azureStorageContainerName')]"

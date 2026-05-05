@@ -199,15 +199,22 @@ Mirror of the weekly stack with `-locked` suffixes. Mode is selected via the `MO
 env var baked into the ACI deployment (`scrapeMode: "locked"`), so the same image
 runs the locked path without command overrides.
 
-- `infra/aci-locked/` — second ACI container group (`f1-fantasy-api-data-aci-locked`),
-  same Key Vault references as weekly, plus `MODE=locked` in `environmentVariables`.
-- `infra/runner-locked/` — runner Logic App (`f1-fantasy-api-data-runner-locked`)
-  pointing at the locked ACI. The MSI grant is reused via
+The ACI and runner Logic App **share** the weekly templates; only the parameters
+files differ:
+
+- ACI: `infra/aci/azuredeploy.json` + `infra/aci/azuredeploy.locked.parameters.json`
+  → second container group (`f1-fantasy-api-data-aci-locked`), same Key Vault
+  references as weekly, plus `scrapeMode: "locked"` which surfaces as `MODE=locked`
+  in `environmentVariables`.
+- Runner: `infra/runner/azuredeploy.json` + `infra/runner/azuredeploy.locked.parameters.json`
+  → second runner Logic App (`f1-fantasy-api-data-runner-locked`) pointing at the
+  locked ACI. The MSI grant is reused via
   `LOGIC_APP_NAME=… ACI_NAME=… bash scripts/grant-runner-msi.sh` (see
   `deploy:grant-runner-msi-locked`).
-- `infra/scheduler-locked/` — calendar-aware scheduler Logic App
-  (`f1-fantasy-api-data-scheduler-locked`). Recurrence trigger fires every hour at
-  `:01` UTC. On each pulse it:
+- Scheduler: `infra/scheduler-locked/` is its **own template** — calendar-aware
+  scheduler Logic App (`f1-fantasy-api-data-scheduler-locked`) with logic that
+  has no overlap with the weekly Monday cron, so it stays separate. Recurrence
+  trigger fires every hour at `:01` UTC. On each pulse it:
     1. HTTP GETs `https://api.jolpi.ca/ergast/f1/current/next.json` (Jolpica/Ergast
        proxy of the next race in the current season).
     2. Computes the current top-of-hour as `concat(formatDateTime(startOfHour(utcNow()), 'yyyy-MM-ddTHH:mm:ss'), 'Z')`.
@@ -234,14 +241,16 @@ Deploy commands:
 - `deploy:logicapps-locked` — runner + grant + scheduler only (skips ACI).
 
 GitHub Actions workflows in `.github/workflows/` build/push the image
-(`docker-build-push.yml`); deploy the weekly stack on changes to
-`infra/aci/**`, `infra/runner/**`, `infra/scheduler/**`, or the grant script
-(`deploy-aci.yml` + `deploy-logicapps.yml`); and deploy the locked stack on
-changes to `infra/aci-locked/**`, `infra/runner-locked/**`,
-`infra/scheduler-locked/**`, or the grant script (`deploy-aci-locked.yml`
-+ `deploy-logicapps-locked.yml`). All four deploy workflows also support
-`workflow_dispatch` for manual triggering. Telegram notifications fire on
-commits and PRs.
+(`docker-build-push.yml`) and ship four deploy workflows
+(`deploy-aci.yml`, `deploy-logicapps.yml`, `deploy-aci-locked.yml`,
+`deploy-logicapps-locked.yml`). Path filters are file-targeted so each
+workflow fires only on changes that affect its own stack — a change to
+the shared `infra/aci/azuredeploy.json` triggers both ACI workflows
+(weekly + locked redeploy in parallel), but a change to
+`infra/aci/azuredeploy.locked.parameters.json` only fires the locked
+workflow. Same pattern for the runner template across the two logicapps
+workflows. All four deploy workflows also support `workflow_dispatch`
+for manual triggering. Telegram notifications fire on commits and PRs.
 
 ## update your instructions
 
