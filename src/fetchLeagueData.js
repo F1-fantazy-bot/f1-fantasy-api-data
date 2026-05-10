@@ -268,6 +268,7 @@ async function fetchSingleLeague(leagueCode) {
     teams.push({
       teamName,
       userName: entry.user_name,
+      teamNo,
       position,
       totalScore,
       raceScores,
@@ -278,6 +279,7 @@ async function fetchSingleLeague(leagueCode) {
     teamsComposition.push({
       teamName,
       userName: entry.user_name,
+      teamNo,
       position,
       budget,
       transfersRemaining,

@@ -180,6 +180,7 @@ async function _fetchLockedTeamSnapshot(entry, teamName) {
   return {
     teamName,
     userName: entry.user_name,
+    teamNo,
     position: entry.cur_rank,
     matchdayId: lockedMatchdayId,
     budget: extractBudget(teamData),
