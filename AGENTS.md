@@ -55,8 +55,14 @@ Both modes share four single-responsibility modules in `src/`:
    constructors via `src/rosterService.js`. Returns an array of
    `{ league, teamsData }` tuples per league.
    - `league`: `{ fetchedAt, leagueName, leagueCode, leagueId, memberCount,
-teams }`, where each team has `{ teamName, userName, position,
+teams }`, where each team has `{ teamName, userName, teamNo, position,
 totalScore, raceScores, raceBudgets, chipsUsed: [{ name, gameDayId }] }`.
+     `teamNo` mirrors the API's `team_no` field (1/2/3) — F1 Fantasy lets each
+     account run up to 3 teams in a league, and this disambiguates them.
+     Combined with `userName` it gives a stable, rename-proof, league-agnostic
+     identifier (`{userName}_{teamNo}`) consumers can use to match the same
+     F1 Fantasy team across multiple leagues. Defaults to `1` when the API
+     omits the field (single-team users).
      `raceBudgets` mirrors `raceScores` (keyed `matchday_<id>`) and stores the
      team's budget cap at the **start** of that race
      (`team_info.maxTeambal` — cost-cap-remaining + roster cost at lock
@@ -68,9 +74,11 @@ totalScore, raceScores, raceBudgets, chipsUsed: [{ name, gameDayId }] }`.
      Budget and transfers live only in the `teamsData` blob.
    - `teamsData`: `{ fetchedAt, leagueName, leagueCode, leagueId,
   matchdayId, teams }` where each team has `{ teamName, userName,
-  position, budget, transfersRemaining, drivers: [...],
+  teamNo, position, budget, transfersRemaining, drivers: [...],
   constructors: [...] }` with each roster entry shaped
      `{ id, name, price, isCaptain, isMegaCaptain, isFinal }`.
+     `teamNo` is the same `team_no` disambiguator described in the
+     `league` shape above.
      `matchdayId` is the **upcoming** matchday (= last-completed + 1,
      with graceful fallback to the last-completed matchday when no
      upcoming data is returned, e.g. at end of season). Reading the
@@ -132,7 +140,7 @@ totalScore, raceScores, raceBudgets, chipsUsed: [{ name, gameDayId }] }`.
      "leagueName":  "...", "leagueCode": "...", "leagueId": 1,
      "matchdayId":  4,
      "teams": [
-       { "teamName":"...", "userName":"...", "position":1,
+       { "teamName":"...", "userName":"...", "teamNo":1, "position":1,
          "matchdayId":4, "budget":107.8, "transfersRemaining":0,
          "drivers":[{id,name,price,isCaptain,isMegaCaptain,isFinal}],
          "constructors":[…],
