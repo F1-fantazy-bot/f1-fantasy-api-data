@@ -5,7 +5,10 @@
 const f1Api = require('./f1FantasyApiService');
 const { extractChipsUsed } = require('./chips');
 const { extractBudget, extractStartBudget } = require('./budget');
-const { getMatchdayRoster, resetCache: resetRosterCache } = require('./rosterService');
+const {
+  getMatchdayRoster,
+  resetCache: resetRosterCache,
+} = require('./rosterService');
 const { downloadDataFromAzureStorage } = require('./azureBlobStorageService');
 
 async function fetchAllLeaguesData() {
@@ -17,8 +20,12 @@ async function fetchAllLeaguesData() {
 
   console.log('2. Fetching user leagues...');
   const allLeagues = await f1Api.getLeagues();
-  const privateLeagues = allLeagues.filter((l) => l.league_type === 'Private' && l.league_code);
-  console.log(`   Found ${allLeagues.length} total, ${privateLeagues.length} private leagues`);
+  const privateLeagues = allLeagues.filter(
+    (l) => l.league_type === 'Private' && l.league_code,
+  );
+  console.log(
+    `   Found ${allLeagues.length} total, ${privateLeagues.length} private leagues`,
+  );
 
   const results = [];
 
@@ -35,7 +42,9 @@ async function fetchAllLeaguesData() {
     }
   }
 
-  console.log(`\n✅ Done: ${results.length}/${privateLeagues.length} leagues fetched`);
+  console.log(
+    `\n✅ Done: ${results.length}/${privateLeagues.length} leagues fetched`,
+  );
 
   return results;
 }
@@ -56,39 +65,61 @@ function _isValidTeamState(teamData) {
   return hasTeamVal && hasRoster;
 }
 
-async function _fetchTeamStateWithFallback(guid, teamNo, preferredMdid, fallbackMdid, teamName) {
+async function _fetchTeamStateWithFallback(
+  guid,
+  teamNo,
+  preferredMdid,
+  fallbackMdid,
+  teamName,
+) {
   // The `v` parameter on getOpponentTeam is the team_no disambiguator;
   // the path-level `teamNo` is empirically ignored when fetching
   // opponents. Pass `teamNo` as `v` so a user with multiple teams
   // returns each one's distinct roster instead of collapsing onto v=1.
   try {
-    const teamData = await f1Api.getOpponentTeam(guid, preferredMdid, { teamNo, v: teamNo });
+    const teamData = await f1Api.getOpponentTeam(guid, preferredMdid, {
+      teamNo,
+      v: teamNo,
+    });
 
     if (_isValidTeamState(teamData)) {
       return { teamData, matchdayId: preferredMdid };
     }
   } catch (err) {
-    console.log(`   ⚠️ Upcoming matchday (${preferredMdid}) fetch failed for ${teamName}: ${err.message}`);
+    console.log(
+      `   ⚠️ Upcoming matchday (${preferredMdid}) fetch failed for ${teamName}: ${err.message}`,
+    );
   }
 
   try {
-    const teamData = await f1Api.getOpponentTeam(guid, fallbackMdid, { teamNo, v: teamNo });
+    const teamData = await f1Api.getOpponentTeam(guid, fallbackMdid, {
+      teamNo,
+      v: teamNo,
+    });
 
     if (_isValidTeamState(teamData)) {
-      console.log(`   ⚠️ Using completed matchday ${fallbackMdid} for ${teamName} (upcoming unavailable)`);
+      console.log(
+        `   ⚠️ Using completed matchday ${fallbackMdid} for ${teamName} (upcoming unavailable)`,
+      );
 
       return { teamData, matchdayId: fallbackMdid };
     }
   } catch (err) {
-    console.log(`   ⚠️ Could not fetch team data for ${teamName}: ${err.message}`);
+    console.log(
+      `   ⚠️ Could not fetch team data for ${teamName}: ${err.message}`,
+    );
   }
 
   return null;
 }
 
 function _extractRosterItems(teamData, rosterMap) {
-  const teamEntry = Array.isArray(teamData?.userTeam) ? teamData.userTeam[0] : null;
-  const playerIds = Array.isArray(teamEntry?.playerid) ? teamEntry.playerid : [];
+  const teamEntry = Array.isArray(teamData?.userTeam)
+    ? teamData.userTeam[0]
+    : null;
+  const playerIds = Array.isArray(teamEntry?.playerid)
+    ? teamEntry.playerid
+    : [];
   const drivers = [];
   const constructors = [];
 
@@ -98,7 +129,8 @@ function _extractRosterItems(teamData, rosterMap) {
     const info = rosterMap ? rosterMap.get(id) : null;
     const position = Number(p.playerpostion);
     const kindFromFeed = info?.kind;
-    const kindFromPosition = Number.isFinite(position) && position >= 6 ? 'constructor' : 'driver';
+    const kindFromPosition =
+      Number.isFinite(position) && position >= 6 ? 'constructor' : 'driver';
     const kind = kindFromFeed || kindFromPosition;
 
     const entry = {
@@ -125,7 +157,9 @@ async function fetchSingleLeague(leagueCode) {
   const leagueInfo = await f1Api.getLeagueInfo(leagueCode);
   const leagueId = leagueInfo.leagueId;
   const leagueName = decodeURIComponent(leagueInfo.leagueName);
-  console.log(`   ${leagueName} (ID: ${leagueId}, ${leagueInfo.memberCount} members)`);
+  console.log(
+    `   ${leagueName} (ID: ${leagueId}, ${leagueInfo.memberCount} members)`,
+  );
 
   console.log('   Fetching leaderboard...');
   const leaderboard = await f1Api.getLeagueLeaderboard(leagueId);
@@ -139,13 +173,20 @@ async function fetchSingleLeague(leagueCode) {
     if (priorLeague && Array.isArray(priorLeague.teams)) {
       for (const prior of priorLeague.teams) {
         if (prior?.raceBudgets && typeof prior.raceBudgets === 'object') {
-          priorRaceBudgetsByTeam.set(_teamKey(prior.userName, prior.teamName), prior.raceBudgets);
+          priorRaceBudgetsByTeam.set(
+            _teamKey(prior.userName, prior.teamName),
+            prior.raceBudgets,
+          );
         }
       }
-      console.log(`   Loaded prior raceBudgets for ${priorRaceBudgetsByTeam.size} teams`);
+      console.log(
+        `   Loaded prior raceBudgets for ${priorRaceBudgetsByTeam.size} teams`,
+      );
     }
   } catch (err) {
-    console.log(`   ⚠️ Could not load prior league-standings.json: ${err.message}`);
+    console.log(
+      `   ⚠️ Could not load prior league-standings.json: ${err.message}`,
+    );
   }
 
   console.log('   Fetching per-race scores...');
@@ -167,7 +208,8 @@ async function fetchSingleLeague(leagueCode) {
     let drivers = [];
     let constructors = [];
     let raceBudgets = {
-      ...(priorRaceBudgetsByTeam.get(_teamKey(entry.user_name, teamName)) || {}),
+      ...(priorRaceBudgetsByTeam.get(_teamKey(entry.user_name, teamName)) ||
+        {}),
     };
     let completedMatchdayIds = [];
 
@@ -175,24 +217,35 @@ async function fetchSingleLeague(leagueCode) {
       // v = teamNo so a user with multiple teams returns each one's
       // distinct mdDetails / chip flags. See _fetchTeamStateWithFallback
       // for the full explanation.
-      const oppData = await f1Api.getOpponentGameDays(entry.user_guid, teamNo, teamNo);
+      const oppData = await f1Api.getOpponentGameDays(
+        entry.user_guid,
+        teamNo,
+        teamNo,
+      );
       const mdDetails = oppData?.mdDetails || {};
 
       for (const [matchdayId, details] of Object.entries(mdDetails)) {
         raceScores[`matchday_${matchdayId}`] = details.pts;
       }
 
-      completedMatchdayIds = Object.keys(mdDetails).map(Number).filter(Number.isFinite);
+      completedMatchdayIds = Object.keys(mdDetails)
+        .map(Number)
+        .filter(Number.isFinite);
 
-      if (completedMatchdayIds.length) lastCompletedMatchdayId = Math.max(...completedMatchdayIds);
+      if (completedMatchdayIds.length)
+        lastCompletedMatchdayId = Math.max(...completedMatchdayIds);
 
       try {
         chipsUsed = extractChipsUsed(oppData);
       } catch (err) {
-        console.log(`   ⚠️ Could not extract chips for ${teamName}: ${err.message}`);
+        console.log(
+          `   ⚠️ Could not extract chips for ${teamName}: ${err.message}`,
+        );
       }
     } catch (err) {
-      console.log(`   ⚠️ Could not fetch race scores for ${teamName}: ${err.message}`);
+      console.log(
+        `   ⚠️ Could not fetch race scores for ${teamName}: ${err.message}`,
+      );
     }
 
     if (lastCompletedMatchdayId) {
@@ -216,8 +269,11 @@ async function fetchSingleLeague(leagueCode) {
 
         budget = extractBudget(fetched.teamData);
 
-        const teamEntry = Array.isArray(fetched.teamData?.userTeam) ? fetched.teamData.userTeam[0] : null;
-        const subsLeft = teamEntry?.team_info?.userSubsleft ?? teamEntry?.usersubsleft;
+        const teamEntry = Array.isArray(fetched.teamData?.userTeam)
+          ? fetched.teamData.userTeam[0]
+          : null;
+        const subsLeft =
+          teamEntry?.team_info?.userSubsleft ?? teamEntry?.usersubsleft;
 
         if (typeof subsLeft === 'number' && Number.isFinite(subsLeft)) {
           transfersRemaining = subsLeft;
@@ -229,7 +285,9 @@ async function fetchSingleLeague(leagueCode) {
           drivers = composition.drivers;
           constructors = composition.constructors;
         } catch (err) {
-          console.log(`   ⚠️ Could not resolve roster for ${teamName}: ${err.message}`);
+          console.log(
+            `   ⚠️ Could not resolve roster for ${teamName}: ${err.message}`,
+          );
         }
 
         // The upcoming race's start-of-week budget (maxTeambal) is already
@@ -252,7 +310,10 @@ async function fetchSingleLeague(leagueCode) {
 
     for (const mdid of missingMdIds) {
       try {
-        const teamData = await f1Api.getOpponentTeam(entry.user_guid, mdid, { teamNo, v: teamNo });
+        const teamData = await f1Api.getOpponentTeam(entry.user_guid, mdid, {
+          teamNo,
+          v: teamNo,
+        });
         const val = extractStartBudget(teamData);
 
         if (val !== null) {
@@ -287,12 +348,16 @@ async function fetchSingleLeague(leagueCode) {
       constructors,
     });
 
-    const chipSummary = chipsUsed.length ? ` [chips: ${chipsUsed.map((c) => c.name).join(', ')}]` : '';
-    const budgetSummary = budget !== null ? ` [budget: ${budget}]` : '';
-    const transfersSummary = transfersRemaining !== null ? ` [transfers: ${transfersRemaining}]` : '';
-    const rosterSummary = drivers.length || constructors.length
-      ? ` [roster@md${teamStateMatchdayId}: ${drivers.length}D/${constructors.length}C]`
+    const chipSummary = chipsUsed.length
+      ? ` [chips: ${chipsUsed.map((c) => c.name).join(', ')}]`
       : '';
+    const budgetSummary = budget !== null ? ` [budget: ${budget}]` : '';
+    const transfersSummary =
+      transfersRemaining !== null ? ` [transfers: ${transfersRemaining}]` : '';
+    const rosterSummary =
+      drivers.length || constructors.length
+        ? ` [roster@md${teamStateMatchdayId}: ${drivers.length}D/${constructors.length}C]`
+        : '';
     const raceBudgetSummary = missingMdIds.length
       ? ` [+${missingMdIds.length} raceBudget${missingMdIds.length === 1 ? '' : 's'}]`
       : '';
