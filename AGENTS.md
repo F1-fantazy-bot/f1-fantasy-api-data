@@ -87,10 +87,22 @@ constructors: [...] }` with each roster entry shaped
      accrue for the next race, and teams that played the Limitless
      chip automatically revert to their pre-chip squad after the race.
      Chip usage comes from top-level `is<Name>taken` / `<name>takengd` flags on
-     the opponent game-days response (see `src/chips.js`). Budget is the single
-     number `userTeam[0].team_info.teamVal` from `getOpponentTeam`
-     (see `src/budget.js`) — already equal to cost-cap-remaining plus
-     sum of driver and constructor costs. `transfersRemaining`
+     the opponent game-days response (see `src/chips.js`). `budget` is the
+     **cost cap going into the upcoming matchday** — the user's spending
+     limit, sourced from `userTeam[0].team_info.maxTeambal` via
+     `extractBudget` (see `src/budget.js`). For matchday 1 this is always
+     `100` (season-start cap); later matchdays grow as the roster
+     appreciates. Consumers compute cost-cap-remaining as
+     `budget − Σ_prices`. `null` when the upstream API didn't return a
+     value (rare; consumers should treat as unknown). The same value is
+     also mirrored into `raceBudgets["matchday_${matchdayId}"]` on the
+     matching `league-standings.json` entry, so the two blobs agree on
+     the start-of-week cap. Historical note: prior to the rename `budget`
+     carried `team_info.teamVal` (the team's current value — sum of
+     roster prices), but no consumer derived cost-cap-remaining from it
+     (the subtraction always yielded 0 because `teamVal ≈ Σ_prices`); the
+     field was repurposed rather than renamed because `budget` is the
+     natural name for "the user's spending limit". `transfersRemaining`
      is `userTeam[0].usersubsleft` from the same response. Driver/constructor
      names and prices come from `/feeds/drivers/{mdid}_en.json` (a single feed
      containing both — `PositionName` of `"DRIVER"` or `"CONSTRUCTOR"` tells

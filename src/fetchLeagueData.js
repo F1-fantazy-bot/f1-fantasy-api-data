@@ -4,7 +4,7 @@
  */
 const f1Api = require('./f1FantasyApiService');
 const { extractChipsUsed } = require('./chips');
-const { extractBudget, extractStartBudget } = require('./budget');
+const { extractBudget } = require('./budget');
 const {
   getMatchdayRoster,
   resetCache: resetRosterCache,
@@ -267,8 +267,6 @@ async function fetchSingleLeague(leagueCode) {
 
         if (!leagueMatchdayId) leagueMatchdayId = teamStateMatchdayId;
 
-        budget = extractBudget(fetched.teamData);
-
         const teamEntry = Array.isArray(fetched.teamData?.userTeam)
           ? fetched.teamData.userTeam[0]
           : null;
@@ -295,10 +293,15 @@ async function fetchSingleLeague(leagueCode) {
         // historical price rises and doesn't shift with in-week transfers.
         // Capture it from the response we already have so consumers can see
         // the next race's budget without waiting for the race to complete.
-        const startBudget = extractStartBudget(fetched.teamData);
+        // Surfaced both in `raceBudgets` (per-matchday history on
+        // league-standings.json) and as the top-level `budget` on the
+        // teams-data.json team entry — the latter lets consumers compute
+        // `costCapRemaining = budget − Σ prices` without joining against
+        // league-standings.
+        budget = extractBudget(fetched.teamData);
 
-        if (startBudget !== null) {
-          raceBudgets[`matchday_${teamStateMatchdayId}`] = startBudget;
+        if (budget !== null) {
+          raceBudgets[`matchday_${teamStateMatchdayId}`] = budget;
         }
       }
     }
@@ -314,7 +317,7 @@ async function fetchSingleLeague(leagueCode) {
           teamNo,
           v: teamNo,
         });
-        const val = extractStartBudget(teamData);
+        const val = extractBudget(teamData);
 
         if (val !== null) {
           raceBudgets[`matchday_${mdid}`] = val;
