@@ -73,9 +73,9 @@ totalScore, raceScores, raceBudgets, chipsUsed: [{ name, gameDayId }] }`.
      `raceBudgets`, so steady-state runs add ~0 extra API calls per team.
      Budget and transfers live only in the `teamsData` blob.
    - `teamsData`: `{ fetchedAt, leagueName, leagueCode, leagueId,
-  matchdayId, teams }` where each team has `{ teamName, userName,
-  teamNo, position, budget, transfersRemaining, drivers: [...],
-  constructors: [...] }` with each roster entry shaped
+matchdayId, teams }` where each team has `{ teamName, userName,
+teamNo, position, budget, transfersRemaining, drivers: [...],
+constructors: [...] }` with each roster entry shaped
      `{ id, name, price, isCaptain, isMegaCaptain, isFinal }`.
      `teamNo` is the same `team_no` disambiguator described in the
      `league` shape above.
@@ -225,13 +225,13 @@ files differ:
   trigger fires every hour at `:01` UTC, **Friday through Sunday only** —
   F1 race weekends are always Fri–Sun, so it's wasteful to poll Mon–Thu.
   On each pulse it:
-    1. HTTP GETs `https://api.jolpi.ca/ergast/f1/current/next.json` (Jolpica/Ergast
-       proxy of the next race in the current season).
-    2. Computes the current top-of-hour as `concat(formatDateTime(startOfHour(utcNow()), 'yyyy-MM-ddTHH:mm:ss'), 'Z')`.
-    3. Builds candidate session-start strings as `date + 'T' + time` for
-       `Qualifying`, `Sprint` (sprint weekends only), and the race itself.
-    4. If top-of-hour equals any candidate → POSTs the runner-locked manual trigger
-       and notifies the log channel; otherwise no-op.
+  1. HTTP GETs `https://api.jolpi.ca/ergast/f1/current/next.json` (Jolpica/Ergast
+     proxy of the next race in the current season).
+  2. Computes the current top-of-hour as `concat(formatDateTime(startOfHour(utcNow()), 'yyyy-MM-ddTHH:mm:ss'), 'Z')`.
+  3. Builds candidate session-start strings as `date + 'T' + time` for
+     `Qualifying`, `Sprint` (sprint weekends only), and the race itself.
+  4. If top-of-hour equals any candidate → POSTs the runner-locked manual trigger
+     and notifies the log channel; otherwise no-op.
 
   Why hourly @ X:01 on weekends: F1 sessions always start on the hour
   (HH:00:00Z in the Jolpica schema), so equality on top-of-hour is sufficient.
@@ -248,6 +248,7 @@ files differ:
   (e.g. `20:30:00Z`), which our top-of-hour matcher would miss.
 
 Deploy commands:
+
 - `npm run deploy:locked` — full locked stack (ACI + runner + grant + scheduler).
 - Individual: `deploy:aci-locked`, `deploy:runner-locked`,
   `deploy:grant-runner-msi-locked`, `deploy:scheduler-locked`.
