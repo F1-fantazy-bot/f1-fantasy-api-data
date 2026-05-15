@@ -1,28 +1,23 @@
 /**
- * Budget extraction helpers.
+ * Budget extraction helper.
  *
- * `extractBudget` returns the total team value (`team_info.teamVal`) — already
- * equal to cost-cap-remaining + sum of roster costs at the time the response
- * was generated. That is the figure most UIs show for "current budget".
+ * `extractBudget` returns `team_info.maxTeambal` — the user's cost cap
+ * going into the given matchday (a.k.a. "max team balance"). For
+ * matchday 1 this is always 100 (the season-start cap); later matchdays
+ * grow as drivers on the roster appreciate. Consumers compute
+ * cost-cap-remaining as `budget − sum_of_prices`.
  *
- * `extractStartBudget` returns `team_info.maxTeambal` — the budget cap that
- * was in force at the start of the given matchday (cost-cap-remaining +
- * roster cost at lock prices). For matchday 1 this is always 100 (the
- * season-start cap), and for later matchdays it grows as drivers on the
- * roster rise in price. Use this when you want the budget *going into*
- * a specific race rather than the live/post-race team value.
+ * The previously-exposed `team_info.teamVal` value (the team's current
+ * total value, equal to the sum of driver + constructor prices in
+ * practice) was never used semantically by any downstream consumer
+ * (only a `console.log` line in this scraper and a fallback path in the
+ * f1-fantazy-bot mapper). It was misleadingly written as `budget` on
+ * the per-team blob entries but yielded `costCapRemaining = budget −
+ * Σprices = 0` for every league team. The rename to `maxTeambal` makes
+ * `budget` carry the actual cost cap — the value consumers want.
  */
 
 function extractBudget(opponentTeamResponse) {
-  const entry = Array.isArray(opponentTeamResponse?.userTeam)
-    ? opponentTeamResponse.userTeam[0]
-    : null;
-  const value = entry?.team_info?.teamVal;
-
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
-}
-
-function extractStartBudget(opponentTeamResponse) {
   const entry = Array.isArray(opponentTeamResponse?.userTeam)
     ? opponentTeamResponse.userTeam[0]
     : null;
@@ -31,4 +26,4 @@ function extractStartBudget(opponentTeamResponse) {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
-module.exports = { extractBudget, extractStartBudget };
+module.exports = { extractBudget };

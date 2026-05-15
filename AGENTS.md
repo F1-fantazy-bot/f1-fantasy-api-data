@@ -73,9 +73,9 @@ totalScore, raceScores, raceBudgets, chipsUsed: [{ name, gameDayId }] }`.
      `raceBudgets`, so steady-state runs add ~0 extra API calls per team.
      Budget and transfers live only in the `teamsData` blob.
    - `teamsData`: `{ fetchedAt, leagueName, leagueCode, leagueId,
-  matchdayId, teams }` where each team has `{ teamName, userName,
-  teamNo, position, budget, transfersRemaining, drivers: [...],
-  constructors: [...] }` with each roster entry shaped
+matchdayId, teams }` where each team has `{ teamName, userName,
+teamNo, position, budget, transfersRemaining, drivers: [...],
+constructors: [...] }` with each roster entry shaped
      `{ id, name, price, isCaptain, isMegaCaptain, isFinal }`.
      `teamNo` is the same `team_no` disambiguator described in the
      `league` shape above.
@@ -87,10 +87,22 @@ totalScore, raceScores, raceBudgets, chipsUsed: [{ name, gameDayId }] }`.
      accrue for the next race, and teams that played the Limitless
      chip automatically revert to their pre-chip squad after the race.
      Chip usage comes from top-level `is<Name>taken` / `<name>takengd` flags on
-     the opponent game-days response (see `src/chips.js`). Budget is the single
-     number `userTeam[0].team_info.teamVal` from `getOpponentTeam`
-     (see `src/budget.js`) — already equal to cost-cap-remaining plus
-     sum of driver and constructor costs. `transfersRemaining`
+     the opponent game-days response (see `src/chips.js`). `budget` is the
+     **cost cap going into the upcoming matchday** — the user's spending
+     limit, sourced from `userTeam[0].team_info.maxTeambal` via
+     `extractBudget` (see `src/budget.js`). For matchday 1 this is always
+     `100` (season-start cap); later matchdays grow as the roster
+     appreciates. Consumers compute cost-cap-remaining as
+     `budget − Σ_prices`. `null` when the upstream API didn't return a
+     value (rare; consumers should treat as unknown). The same value is
+     also mirrored into `raceBudgets["matchday_${matchdayId}"]` on the
+     matching `league-standings.json` entry, so the two blobs agree on
+     the start-of-week cap. Historical note: prior to the rename `budget`
+     carried `team_info.teamVal` (the team's current value — sum of
+     roster prices), but no consumer derived cost-cap-remaining from it
+     (the subtraction always yielded 0 because `teamVal ≈ Σ_prices`); the
+     field was repurposed rather than renamed because `budget` is the
+     natural name for "the user's spending limit". `transfersRemaining`
      is `userTeam[0].usersubsleft` from the same response. Driver/constructor
      names and prices come from `/feeds/drivers/{mdid}_en.json` (a single feed
      containing both — `PositionName` of `"DRIVER"` or `"CONSTRUCTOR"` tells
@@ -225,13 +237,13 @@ files differ:
   trigger fires every hour at `:01` UTC, **Friday through Sunday only** —
   F1 race weekends are always Fri–Sun, so it's wasteful to poll Mon–Thu.
   On each pulse it:
-    1. HTTP GETs `https://api.jolpi.ca/ergast/f1/current/next.json` (Jolpica/Ergast
-       proxy of the next race in the current season).
-    2. Computes the current top-of-hour as `concat(formatDateTime(startOfHour(utcNow()), 'yyyy-MM-ddTHH:mm:ss'), 'Z')`.
-    3. Builds candidate session-start strings as `date + 'T' + time` for
-       `Qualifying`, `Sprint` (sprint weekends only), and the race itself.
-    4. If top-of-hour equals any candidate → POSTs the runner-locked manual trigger
-       and notifies the log channel; otherwise no-op.
+  1. HTTP GETs `https://api.jolpi.ca/ergast/f1/current/next.json` (Jolpica/Ergast
+     proxy of the next race in the current season).
+  2. Computes the current top-of-hour as `concat(formatDateTime(startOfHour(utcNow()), 'yyyy-MM-ddTHH:mm:ss'), 'Z')`.
+  3. Builds candidate session-start strings as `date + 'T' + time` for
+     `Qualifying`, `Sprint` (sprint weekends only), and the race itself.
+  4. If top-of-hour equals any candidate → POSTs the runner-locked manual trigger
+     and notifies the log channel; otherwise no-op.
 
   Why hourly @ X:01 on weekends: F1 sessions always start on the hour
   (HH:00:00Z in the Jolpica schema), so equality on top-of-hour is sufficient.
@@ -248,6 +260,7 @@ files differ:
   (e.g. `20:30:00Z`), which our top-of-hour matcher would miss.
 
 Deploy commands:
+
 - `npm run deploy:locked` — full locked stack (ACI + runner + grant + scheduler).
 - Individual: `deploy:aci-locked`, `deploy:runner-locked`,
   `deploy:grant-runner-msi-locked`, `deploy:scheduler-locked`.
