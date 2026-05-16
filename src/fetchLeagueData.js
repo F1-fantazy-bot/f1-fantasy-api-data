@@ -7,6 +7,7 @@ const { extractChipsUsed } = require('./chips');
 const { extractBudget } = require('./budget');
 const {
   getMatchdayRoster,
+  getPlayersByMatchday,
   resetCache: resetRosterCache,
 } = require('./rosterService');
 const { downloadDataFromAzureStorage } = require('./azureBlobStorageService');
@@ -46,7 +47,39 @@ async function fetchAllLeaguesData() {
     `\n✅ Done: ${results.length}/${privateLeagues.length} leagues fetched`,
   );
 
-  return results;
+  // Resolve the global driver/constructor price list once per run. Matchday
+  // is global across all private leagues, so any league's resolved
+  // `matchdayId` is the right answer. We pick the first one available.
+  let prices = null;
+  const referenceMatchdayId = results
+    .map((r) => r?.teamsData?.matchdayId)
+    .find((mdid) => typeof mdid === 'number' && Number.isFinite(mdid));
+
+  if (referenceMatchdayId) {
+    try {
+      const { drivers, constructors } =
+        await getPlayersByMatchday(referenceMatchdayId);
+      prices = {
+        fetchedAt: new Date().toISOString(),
+        matchdayId: referenceMatchdayId,
+        drivers,
+        constructors,
+      };
+      console.log(
+        `✅ Resolved prices for matchday ${referenceMatchdayId}: ${drivers.length} drivers, ${constructors.length} constructors`,
+      );
+    } catch (err) {
+      console.log(
+        `⚠️  Could not resolve global prices for matchday ${referenceMatchdayId}: ${err.message}`,
+      );
+    }
+  } else {
+    console.log(
+      '⚠️  No matchday discovered from any league — skipping prices.json',
+    );
+  }
+
+  return { leagues: results, prices };
 }
 
 function _teamKey(userName, teamName) {

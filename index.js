@@ -9,7 +9,7 @@ const f1Api = require('./src/f1FantasyApiService');
 const MODE = (process.env.MODE || 'weekly').toLowerCase();
 
 async function runWeekly() {
-  const allLeagues = await fetchAllLeaguesData();
+  const { leagues: allLeagues, prices } = await fetchAllLeaguesData();
 
   if (!allLeagues || allLeagues.length === 0) {
     throw new Error('No league data fetched');
@@ -22,6 +22,14 @@ async function runWeekly() {
     ),
   );
 
+  if (prices) {
+    console.log(
+      `Prices snapshot @ md${prices.matchdayId}: ${prices.drivers.length} drivers, ${prices.constructors.length} constructors`,
+    );
+  } else {
+    console.log('Prices snapshot: (unavailable — see warnings above)');
+  }
+
   if (process.env.AZURE_STORAGE_CONNECTION_STRING) {
     for (const { league, teamsData } of allLeagues) {
       await uploadDataToAzureStorage(league, league.leagueCode);
@@ -31,13 +39,24 @@ async function runWeekly() {
         'teams-data.json',
       );
     }
+
+    if (prices) {
+      // Container-root upload (no `leagues/<code>/` prefix) — driver and
+      // constructor prices are league-agnostic.
+      await uploadDataToAzureStorage(prices, null, 'prices.json');
+    } else {
+      console.log('⚠️  Skipping prices.json upload — no prices snapshot');
+    }
   } else {
     console.log(
       '\n⚠️  AZURE_STORAGE_CONNECTION_STRING not set — skipping blob upload',
     );
   }
 
-  await telegramService.notifySuccess(allLeagues.map(({ league }) => league));
+  await telegramService.notifySuccess(
+    allLeagues.map(({ league }) => league),
+    prices,
+  );
 }
 
 async function runLocked() {
@@ -53,9 +72,9 @@ async function runLocked() {
   );
   allLeagues.forEach(({ league, blobs }) =>
     console.log(
-      `  - ${league.leagueName} (${league.leagueCode}): ${blobs.length} blob(s) — ${blobs
-        .map((b) => b.blobName)
-        .join(', ') || '(none)'}`,
+      `  - ${league.leagueName} (${league.leagueCode}): ${blobs.length} blob(s) — ${
+        blobs.map((b) => b.blobName).join(', ') || '(none)'
+      }`,
     ),
   );
 

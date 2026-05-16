@@ -31,9 +31,13 @@ async function getMatchdayRoster(matchdayId) {
   const roster = new Map();
 
   for (const item of items) {
-    if (!item || item.PlayerId === undefined || item.PlayerId === null) continue;
+    if (!item || item.PlayerId === undefined || item.PlayerId === null)
+      continue;
     const id = String(item.PlayerId);
-    const position = typeof item.PositionName === 'string' ? item.PositionName.toUpperCase() : '';
+    const position =
+      typeof item.PositionName === 'string'
+        ? item.PositionName.toUpperCase()
+        : '';
     const kind = position === 'CONSTRUCTOR' ? 'constructor' : 'driver';
     const name = item.DisplayName || item.FUllName || item.FullName || '';
     const priceRaw = item.Value;
@@ -50,8 +54,52 @@ async function getMatchdayRoster(matchdayId) {
   return roster;
 }
 
+/**
+ * Returns the full driver + constructor list for `matchdayId` in the
+ * public `prices.json` blob shape: `{ drivers, constructors }` where
+ * each entry is `{ id, name, price }`, sorted by price descending.
+ *
+ * Reuses the memoized `getMatchdayRoster` fetch — zero extra HTTP cost
+ * when called after `fetchSingleLeague` has already resolved this
+ * matchday's roster.
+ *
+ * The upstream feed (`/feeds/drivers/{mdid}_en.json`) carries many more
+ * fields per player than we expose here — `OldPlayerValue` (last week's
+ * price → delta), `SelectedPercentage`, `CaptainSelectedPercentage`,
+ * `ProjectedGamedayPoints`, `OverallPpints` (season total),
+ * `AdditionalStats.value_for_money`, `DriverTLA`, `TeamName`, `IsActive`,
+ * etc. We ship the minimal `{ id, name, price }` shape and can extend
+ * additively when a consumer surfaces a concrete need.
+ */
+async function getPlayersByMatchday(matchdayId) {
+  const roster = await getMatchdayRoster(matchdayId);
+  const drivers = [];
+  const constructors = [];
+
+  for (const [id, info] of roster.entries()) {
+    const entry = { id, name: info.name, price: info.price };
+
+    if (info.kind === 'constructor') {
+      constructors.push(entry);
+    } else {
+      drivers.push(entry);
+    }
+  }
+
+  const byPriceDesc = (a, b) => {
+    const aPrice = typeof a.price === 'number' ? a.price : -Infinity;
+    const bPrice = typeof b.price === 'number' ? b.price : -Infinity;
+    return bPrice - aPrice;
+  };
+
+  drivers.sort(byPriceDesc);
+  constructors.sort(byPriceDesc);
+
+  return { drivers, constructors };
+}
+
 function resetCache() {
   cache.clear();
 }
 
-module.exports = { getMatchdayRoster, resetCache };
+module.exports = { getMatchdayRoster, getPlayersByMatchday, resetCache };
