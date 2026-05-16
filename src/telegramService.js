@@ -8,7 +8,9 @@ class TelegramService {
     const token = process.env.TELEGRAM_BOT_TOKEN;
 
     if (!token) {
-      console.warn('⚠️  TELEGRAM_BOT_TOKEN not set — Telegram notifications disabled');
+      console.warn(
+        '⚠️  TELEGRAM_BOT_TOKEN not set — Telegram notifications disabled',
+      );
       this.bot = null;
 
       return;
@@ -25,8 +27,11 @@ class TelegramService {
     }
 
     try {
-      const isChannelMessage = chatId === LOG_CHANNEL_ID || chatId === ERRORS_CHANNEL_ID;
-      const formattedMessage = isChannelMessage ? `F1_FANTASY_API: ${message}` : message;
+      const isChannelMessage =
+        chatId === LOG_CHANNEL_ID || chatId === ERRORS_CHANNEL_ID;
+      const formattedMessage = isChannelMessage
+        ? `F1_FANTASY_API: ${message}`
+        : message;
 
       await this.bot.sendMessage(chatId, formattedMessage, {
         parse_mode: 'Markdown',
@@ -37,15 +42,19 @@ class TelegramService {
     }
   }
 
-  async notifySuccess(allLeagues) {
+  async notifySuccess(allLeagues, prices = null) {
     const leagues = Array.isArray(allLeagues) ? allLeagues : [allLeagues];
-    const leagueLines = leagues.map((l) =>
-      `• ${l.leagueName} (${l.teams.length} teams)`
-    ).join('\n');
+    const leagueLines = leagues
+      .map((l) => `• ${l.leagueName} (${l.teams.length} teams)`)
+      .join('\n');
+
+    const pricesLine = prices
+      ? `\nPrices @ md${prices.matchdayId}: ${prices.drivers.length} drivers, ${prices.constructors.length} constructors`
+      : '';
 
     const message = `✅ *League data fetched successfully*
 Leagues: ${leagues.length}
-${leagueLines}
+${leagueLines}${pricesLine}
 Fetched at: ${new Date().toISOString()}`;
 
     await this.sendMessage(message, LOG_CHANNEL_ID);
@@ -65,10 +74,7 @@ Fetched at: ${new Date().toISOString()}`;
         return `• ${league.leagueName} (${mdSummary}, ${(blobs || []).length} blob)`;
       })
       .join('\n');
-    const totalBlobs = list.reduce(
-      (acc, r) => acc + ((r.blobs || []).length),
-      0,
-    );
+    const totalBlobs = list.reduce((acc, r) => acc + (r.blobs || []).length, 0);
 
     const message = `🔒 *Locked-snapshot data fetched successfully*
 Leagues: ${list.length}

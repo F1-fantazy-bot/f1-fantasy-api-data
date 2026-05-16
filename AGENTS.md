@@ -26,7 +26,8 @@ To iterate on login/scraping with a visible browser, set `F1_HEADLESS=false` in 
 `index.js` switches on `MODE` env var (default `weekly`):
 
 - `MODE=weekly` → runs `fetchAllLeaguesData()` and uploads
-  `league-standings.json` + `teams-data.json` per league. Used by the
+  `league-standings.json` + `teams-data.json` per league, plus one
+  global `prices.json` at the container root. Used by the
   Monday Logic App scheduler. **This path is unchanged.**
 - `MODE=locked` → runs `fetchAllLeaguesLocked()` and uploads only
   `leagues/{code}/locked/matchday_{N}.json`, one blob per (league,
@@ -52,8 +53,14 @@ Both modes share four single-responsibility modules in `src/`:
    per-team per-matchday scores via `getOpponentGameDays`. For each team it also
    extracts chip usage via `src/chips.js` (`extractChipsUsed`), budget and
    transfers via `getOpponentTeam`, and resolves the team's drivers and
-   constructors via `src/rosterService.js`. Returns an array of
-   `{ league, teamsData }` tuples per league.
+   constructors via `src/rosterService.js`. After the per-league loop it
+   also resolves the global driver/constructor price list **once** for
+   the upcoming matchday via `rosterService.getPlayersByMatchday`
+   (zero extra HTTP — reuses the memoized fetch already populated by
+   the per-team roster resolution). Returns
+   `{ leagues: [{ league, teamsData }, …], prices }` where `prices` is
+   `null` if no matchday could be discovered (graceful: weekly run still
+   succeeds with league blobs only).
    - `league`: `{ fetchedAt, leagueName, leagueCode, leagueId, memberCount,
 teams }`, where each team has `{ teamName, userName, teamNo, position,
 totalScore, raceScores, raceBudgets, chipsUsed: [{ name, gameDayId }] }`.
@@ -107,14 +114,48 @@ constructors: [...] }` with each roster entry shaped
      names and prices come from `/feeds/drivers/{mdid}_en.json` (a single feed
      containing both — `PositionName` of `"DRIVER"` or `"CONSTRUCTOR"` tells
      them apart) resolved through `src/rosterService.js`, which memoizes the
-     fetch per matchday.
+     fetch per matchday. The same module also exports
+     `getPlayersByMatchday(matchdayId)` which returns the full driver +
+     constructor list in the public `prices.json` shape
+     (`{ drivers, constructors }` where each entry is
+     `{ id, name, price }`, sorted by price descending). `fetchLeagueData`
+     calls it **once per weekly run** to produce the global prices blob.
+     The feed item shape is richer than what we surface — known fields
+     include (non-exhaustive): `PlayerId`, `PositionName`, `DisplayName`,
+     `FUllName` (sic), `Value` (current price), `OldPlayerValue` (previous
+     price → delta), `SelectedPercentage`, `CaptainSelectedPercentage`,
+     `ProjectedGamedayPoints`, `OverallPpints` (sic — season total),
+     `GamedayPoints`, `AdditionalStats.value_for_money`, `DriverTLA`,
+     `TeamName`, `TeamId`, `IsActive`, `Status`, `SessionWisePoints`.
+     The minimal `{ id, name, price }` shape was a deliberate first
+     ship; later additions can extend the blob additively without a
+     consumer break.
 3. `azureBlobStorageService.js` — uploads to
-   `leagues/<leagueCode>/<blobName>` in the configured container. `blobName`
+   `leagues/<leagueCode>/<blobName>` in the configured container when
+   `leagueCode` is provided, or **directly to `<blobName>` at the
+   container root** when `leagueCode` is null/empty. `blobName`
    defaults to `league-standings.json`; the weekly path also uploads
-   `teams-data.json` per league, and the locked path uploads
+   `teams-data.json` per league plus a single global
+   `prices.json` at the container root, and the locked path uploads
    `locked/matchday_{N}.json` per league per locked matchday. Skipped
    entirely when `AZURE_STORAGE_CONNECTION_STRING` is unset (useful for
    local dry runs).
+
+   `prices.json` shape:
+
+   ```jsonc
+   {
+     "fetchedAt": "<ISO>",
+     "matchdayId": 5,
+     "drivers":      [{ "id": "1",  "name": "M. Verstappen", "price": 30.4 }, …],
+     "constructors": [{ "id": "28", "name": "Mercedes",       "price": 30.5 }, …]
+   }
+   ```
+
+   Driver/constructor prices are league-agnostic, so the blob lives at
+   the container root rather than under `leagues/<code>/`. Written only
+   by the weekly path; the locked path does not re-emit `prices.json`
+   because prices don't change between lock and race end.
 4. `telegramService.js` — singleton instance (`module.exports = new TelegramService()`).
    Sends success to `LOG_CHANNEL_ID` (with separate `notifySuccess` /
    `notifySuccessLocked` messages so the channel makes the mode obvious),
