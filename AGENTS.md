@@ -118,7 +118,10 @@ constructors: [...] }` with each roster entry shaped
      `getPlayersByMatchday(matchdayId)` which returns the full driver +
      constructor list in the public `prices.json` shape
      (`{ drivers, constructors }` where each entry is
-     `{ id, name, price }`, sorted by price descending). `fetchLeagueData`
+     `{ id, name, price, code, teamId, teamName, isActive, status }`, sorted by
+     price descending). Inactive entries are retained because saved fantasy
+     teams may still own them; consumers should only offer active entries as
+     new selections. `fetchLeagueData`
      calls it **once per weekly run** to produce the global prices blob.
      The feed item shape is richer than what we surface — known fields
      include (non-exhaustive): `PlayerId`, `PositionName`, `DisplayName`,
@@ -127,9 +130,9 @@ constructors: [...] }` with each roster entry shaped
      `ProjectedGamedayPoints`, `OverallPpints` (sic — season total),
      `GamedayPoints`, `AdditionalStats.value_for_money`, `DriverTLA`,
      `TeamName`, `TeamId`, `IsActive`, `Status`, `SessionWisePoints`.
-     The minimal `{ id, name, price }` shape was a deliberate first
-     ship; later additions can extend the blob additively without a
-     consumer break.
+     Identity and activity metadata is preserved so consumers can distinguish
+     duplicate names/codes during driver changes without a breaking schema
+     migration.
 3. `azureBlobStorageService.js` — uploads to
    `leagues/<leagueCode>/<blobName>` in the configured container when
    `leagueCode` is provided, or **directly to `<blobName>` at the

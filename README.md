@@ -131,6 +131,26 @@ season), the most-recently-completed matchday is used instead.
 }
 ```
 
+The root `prices.json` driver entries retain the F1 Fantasy player identity
+and activity metadata needed to distinguish duplicate names or codes during
+driver changes:
+
+```json
+{
+  "id": "116",
+  "name": "L. Lawson",
+  "code": "LAW",
+  "teamId": "9",
+  "teamName": "Red Bull Racing",
+  "price": 14.5,
+  "isActive": true,
+  "status": null
+}
+```
+
+Inactive entries remain in the file because an existing fantasy team may
+still own them, but consumers should only offer active entries as new picks.
+
 ## Deployment
 
 ### Deploy the ACI workload
