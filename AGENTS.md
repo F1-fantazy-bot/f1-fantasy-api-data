@@ -118,7 +118,7 @@ constructors: [...] }` with each roster entry shaped
      `getPlayersByMatchday(matchdayId)` which returns the full driver +
      constructor list in the public `prices.json` shape
      (`{ drivers, constructors }` where each entry is
-     `{ id, name, price, code, teamId, teamName, isActive, status }`, sorted by
+     `{ id, name, price, code, teamId, teamName, isActive }`, sorted by
      price descending). Inactive entries are retained because saved fantasy
      teams may still own them; consumers should only offer active entries as
      new selections. `fetchLeagueData`
@@ -129,7 +129,7 @@ constructors: [...] }` with each roster entry shaped
      price → delta), `SelectedPercentage`, `CaptainSelectedPercentage`,
      `ProjectedGamedayPoints`, `OverallPpints` (sic — season total),
      `GamedayPoints`, `AdditionalStats.value_for_money`, `DriverTLA`,
-     `TeamName`, `TeamId`, `IsActive`, `Status`, `SessionWisePoints`.
+     `TeamName`, `TeamId`, `IsActive`, `SessionWisePoints`.
      Identity and activity metadata is preserved so consumers can distinguish
      duplicate names/codes during driver changes without a breaking schema
      migration.

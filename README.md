@@ -143,8 +143,7 @@ driver changes:
   "teamId": "9",
   "teamName": "Red Bull Racing",
   "price": 14.5,
-  "isActive": true,
-  "status": null
+  "isActive": true
 }
 ```
 

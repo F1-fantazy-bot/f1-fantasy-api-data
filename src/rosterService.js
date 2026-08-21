@@ -66,7 +66,6 @@ async function getMatchdayRoster(matchdayId) {
       teamName:
         typeof item.TeamName === 'string' ? item.TeamName.trim() : '',
       isActive: _normalizeBoolean(item.IsActive),
-      status: item.Status ?? null,
     });
   }
 
@@ -106,7 +105,6 @@ async function getPlayersByMatchday(matchdayId) {
       teamId: info.teamId,
       teamName: info.teamName,
       isActive: info.isActive,
-      status: info.status,
     };
 
     if (info.kind === 'constructor') {
