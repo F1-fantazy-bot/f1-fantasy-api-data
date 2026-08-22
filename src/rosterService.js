@@ -1,6 +1,6 @@
 /**
  * Roster service: resolves F1 Fantasy player ids (drivers + constructors)
- * to `{ name, price, kind }` using the `/feeds/drivers/{mdid}_en.json` feed.
+ * to player metadata using the `/feeds/drivers/{mdid}_en.json` feed.
  *
  * The drivers feed is a single source of truth for both drivers and
  * constructors — each item carries a `PositionName` of `"DRIVER"` or
@@ -9,6 +9,16 @@
 const f1Api = require('./f1FantasyApiService');
 
 const cache = new Map();
+
+function _normalizeBoolean(value) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  if (typeof value === 'string') {
+    return ['true', '1', 'yes'].includes(value.trim().toLowerCase());
+  }
+
+  return null;
+}
 
 function _normalizeFeed(raw) {
   if (!raw || typeof raw !== 'object') return [];
@@ -47,6 +57,15 @@ async function getMatchdayRoster(matchdayId) {
       name,
       price: Number.isFinite(price) ? price : null,
       kind,
+      code:
+        typeof item.DriverTLA === 'string' ? item.DriverTLA.trim() : '',
+      teamId:
+        item.TeamId === undefined || item.TeamId === null
+          ? null
+          : String(item.TeamId),
+      teamName:
+        typeof item.TeamName === 'string' ? item.TeamName.trim() : '',
+      isActive: _normalizeBoolean(item.IsActive),
     });
   }
 
@@ -57,19 +76,20 @@ async function getMatchdayRoster(matchdayId) {
 /**
  * Returns the full driver + constructor list for `matchdayId` in the
  * public `prices.json` blob shape: `{ drivers, constructors }` where
- * each entry is `{ id, name, price }`, sorted by price descending.
+ * each entry includes stable identity and activity metadata and is sorted by
+ * price descending.
  *
  * Reuses the memoized `getMatchdayRoster` fetch — zero extra HTTP cost
  * when called after `fetchSingleLeague` has already resolved this
  * matchday's roster.
  *
  * The upstream feed (`/feeds/drivers/{mdid}_en.json`) carries many more
- * fields per player than we expose here — `OldPlayerValue` (last week's
+ * fields per player — `OldPlayerValue` (last week's
  * price → delta), `SelectedPercentage`, `CaptainSelectedPercentage`,
  * `ProjectedGamedayPoints`, `OverallPpints` (season total),
  * `AdditionalStats.value_for_money`, `DriverTLA`, `TeamName`, `IsActive`,
- * etc. We ship the minimal `{ id, name, price }` shape and can extend
- * additively when a consumer surfaces a concrete need.
+ * etc. Activity metadata is intentionally preserved so consumers can keep an
+ * owned inactive player without offering that player as a new purchase.
  */
 async function getPlayersByMatchday(matchdayId) {
   const roster = await getMatchdayRoster(matchdayId);
@@ -77,7 +97,15 @@ async function getPlayersByMatchday(matchdayId) {
   const constructors = [];
 
   for (const [id, info] of roster.entries()) {
-    const entry = { id, name: info.name, price: info.price };
+    const entry = {
+      id,
+      name: info.name,
+      price: info.price,
+      code: info.code,
+      teamId: info.teamId,
+      teamName: info.teamName,
+      isActive: info.isActive,
+    };
 
     if (info.kind === 'constructor') {
       constructors.push(entry);
