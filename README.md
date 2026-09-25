@@ -12,8 +12,7 @@ The container has two modes, switched via the `MODE` env var:
   budget, transfers, and chips used. Writes two blobs per league:
   `leagues/{code}/league-standings.json` (history + chips) and
   `leagues/{code}/teams-data.json` (current roster snapshot for the
-  upcoming matchday). Designed to run **once a week, after the race
-  weekend** (Monday Logic App scheduler).
+  upcoming matchday). Scheduled for **Monday and Thursday at 03:00 UTC** (Logic App scheduler).
 
 - **`MODE=locked`** (`npm run scrape:locked`) — Captures the **just-locked**
   matchday's roster, captain, budget, transfers and chips for every team.
@@ -181,7 +180,7 @@ The `logicAppPrincipalId` value is emitted by the runner ARM deployment outputs.
 
 ### Deploy the weekly scheduler Logic App
 
-Deploy the Monday scheduler after the runner exists:
+Deploy the Monday/Thursday scheduler after the runner exists:
 
 ```bash
 npm run deploy:scheduler
@@ -193,7 +192,7 @@ Or deploy both Logic Apps in order:
 npm run deploy:logicapps
 ```
 
-The scheduler runs every Monday at `00:00 UTC` and invokes the runner Logic App callback URL.
+The scheduler runs every Monday and Thursday at `03:00 UTC` and invokes the runner Logic App callback URL.
 
 ### Manually trigger the runner
 

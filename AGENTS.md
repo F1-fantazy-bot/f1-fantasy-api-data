@@ -255,7 +255,7 @@ Apps (runner + scheduler) live under `infra/runner/` and `infra/scheduler/`. The
 Logic App uses a system-assigned identity to call the ACI `/start` endpoint, so it needs
 Contributor on the ACI — `scripts/grant-runner-msi.sh` handles that idempotently and is
 wired into `npm run deploy:logicapps` between `deploy:runner` and `deploy:scheduler`.
-The scheduler fires every Monday 03:00 UTC.
+The scheduler fires every Monday and Thursday at 03:00 UTC.
 
 ### Locked-snapshot stack (drives `leagues/{code}/locked/matchday_{N}.json`)
 

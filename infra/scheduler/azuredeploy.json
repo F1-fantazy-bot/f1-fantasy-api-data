@@ -45,14 +45,15 @@
             "telegramBotToken": { "type": "SecureString" }
           },
           "triggers": {
-            "Every_Monday": {
+            "Every_Monday_And_Thursday": {
               "type": "Recurrence",
               "recurrence": {
                 "frequency": "Week",
                 "interval": 1,
                 "schedule": {
                   "weekDays": [
-                    "Monday"
+                    "Monday",
+                    "Thursday"
                   ],
                   "hours": [
                     3
