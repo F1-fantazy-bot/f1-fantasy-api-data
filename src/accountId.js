@@ -1,12 +1,12 @@
 const crypto = require('crypto');
 
-const ACCOUNT_ID_LENGTH = 12;
+const ACCOUNT_ID_LENGTH = 16;
 
 /**
  * Derive a stable, opaque account identifier from the F1 Fantasy user GUID.
  *
- * The raw GUID is intentionally not persisted in league blobs. A 12-hex
- * SHA-256 prefix gives us a compact 48-bit identifier that is stable across
+ * The raw GUID is intentionally not persisted in league blobs. A 16-hex
+ * SHA-256 prefix gives us a compact 64-bit identifier that is stable across
  * leagues/runs while keeping the upstream account GUID private.
  */
 function deriveAccountId(userGuid) {
