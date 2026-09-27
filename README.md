@@ -53,6 +53,20 @@ Two blobs are uploaded per league under `leagues/<leagueCode>/`:
 
 ### `league-standings.json` — leaderboard + per-race scores
 
+Each team also carries `teamNo` and `accountId`. `accountId` is a stable
+12-hex-character SHA-256-derived identifier based on F1 Fantasy's
+trimmed, case-normalized `user_guid`; invalid or missing GUIDs produce `null`,
+and the raw GUID is not persisted. Consumers should use
+`userName + teamNo + accountId` for human-readable canonical identity.
+This keeps two distinct accounts with the same display name and `team_no`
+separate while remaining stable across leagues.
+The stable logical key is `accountId + teamNo`; a username may change.
+`teamName` is for display and can only help match unambiguous older snapshots.
+Historical race budgets with an ambiguous legacy display identity are not reused.
+The same `accountId` is included in current `teams-data.json` and newly
+captured `locked/matchday_N.json` entries.
+
+
 `raceBudgets` mirrors `raceScores` and records each team's budget cap at the
 **start** of each race (`team_info.maxTeambal` — cost-cap-remaining + roster
 cost at lock prices). For matchday 1 this is always `100` (season-start cap).
@@ -72,6 +86,8 @@ extra API traffic.
     {
       "teamName": "Team A",
       "userName": "user_a",
+      "teamNo": 1,
+      "accountId": "a84f1234abcd",
       "position": 1,
       "totalScore": 500,
       "raceScores": { "matchday_1": 50, "matchday_2": 60 },
@@ -102,6 +118,8 @@ season), the most-recently-completed matchday is used instead.
     {
       "teamName": "Team A",
       "userName": "user_a",
+      "teamNo": 1,
+      "accountId": "a84f1234abcd",
       "position": 1,
       "budget": 105.8,
       "transfersRemaining": 3,

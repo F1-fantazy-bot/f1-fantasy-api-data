@@ -6,6 +6,7 @@
     "start": "node index.js",
     "scrape:locked": "MODE=locked node index.js",
     "lint": "eslint .",
+    "test": "node --test src/*.test.js",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "deploy": "npm run deploy:aci",
@@ -30,5 +31,8 @@
     "dotenv": "^16.5.0",
     "node-telegram-bot-api": "^0.66.0",
     "playwright": "^1.52.0"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.1"
   }
 }

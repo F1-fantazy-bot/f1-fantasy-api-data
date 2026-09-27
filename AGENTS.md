@@ -12,12 +12,13 @@ npx playwright install chromium   # required once before first run
 npm start                         # weekly scrape — runs index.js end-to-end (needs .env)
 npm run scrape:locked             # locked-snapshot scrape (sets MODE=locked)
 npm run lint                      # eslint .
+npm test                          # node:test identity and scraper regressions
 npm run lint:fix
 npm run format                    # prettier --write .
 ```
 
-There is no test suite and no eslint config file checked in — `npm run lint` currently
-uses ESLint defaults. Do not invent tests or a test runner unless asked.
+ESLint uses `.eslintrc.json`; `npm test` covers account ID derivation,
+safe historical-budget joins, and the multi-team `v: teamNo` API discriminator.
 
 To iterate on login/scraping with a visible browser, set `F1_HEADLESS=false` in `.env`.
 
@@ -62,14 +63,15 @@ Both modes share four single-responsibility modules in `src/`:
    `null` if no matchday could be discovered (graceful: weekly run still
    succeeds with league blobs only).
    - `league`: `{ fetchedAt, leagueName, leagueCode, leagueId, memberCount,
-teams }`, where each team has `{ teamName, userName, teamNo, position,
+teams }`, where each team has `{ teamName, userName, teamNo, accountId, position,
 totalScore, raceScores, raceBudgets, chipsUsed: [{ name, gameDayId }] }`.
-     `teamNo` mirrors the API's `team_no` field (1/2/3) — F1 Fantasy lets each
-     account run up to 3 teams in a league, and this disambiguates them.
-     Combined with `userName` it gives a stable, rename-proof, league-agnostic
-     identifier (`{userName}_{teamNo}`) consumers can use to match the same
-     F1 Fantasy team across multiple leagues. Defaults to `1` when the API
-     omits the field (single-team users).
+     `teamNo` mirrors the API's `team_no` field (1/2/3). `accountId` is
+     a stable 12-hex-character SHA-256-derived identifier based on the
+     leaderboard entry's case-normalized, validated `user_guid`; the raw GUID is not persisted. Consumers
+     should combine `userName + teamNo + accountId` for a readable,
+     league-agnostic identity. This is required because two different F1
+     accounts can share the same display `userName` and both have
+     `team_no = 1`. `teamNo` defaults to `1` when the API omits it.
      `raceBudgets` mirrors `raceScores` (keyed `matchday_<id>`) and stores the
      team's budget cap at the **start** of that race
      (`team_info.maxTeambal` — cost-cap-remaining + roster cost at lock
@@ -84,8 +86,8 @@ matchdayId, teams }` where each team has `{ teamName, userName,
 teamNo, position, budget, transfersRemaining, drivers: [...],
 constructors: [...] }` with each roster entry shaped
      `{ id, name, price, isCaptain, isMegaCaptain, isFinal }`.
-     `teamNo` is the same `team_no` disambiguator described in the
-     `league` shape above.
+     `teamNo` and `accountId` are the same identity fields described in
+     the `league` shape above.
      `matchdayId` is the **upcoming** matchday (= last-completed + 1,
      with graceful fallback to the last-completed matchday when no
      upcoming data is returned, e.g. at end of season). Reading the
@@ -168,7 +170,8 @@ constructors: [...] }` with each roster entry shaped
 
 5. `fetchLockedLeagueData.js` — locked-snapshot orchestration. Mirrors a
    minimal subset of `fetchLeagueData.js`: for each private league it
-   calls `getLeagueLeaderboard`, then for each team uses
+   calls `getLeagueLeaderboard`, derives the same opaque `accountId` from
+   each entry's `user_guid`, then for each team uses
    `getOpponentGameDays(guid, teamNo, /* v */ teamNo)` to find the
    latest matchday in `mdDetails` and probes
    `getOpponentTeam(guid, md, { teamNo, v: teamNo })` first for
@@ -196,7 +199,7 @@ constructors: [...] }` with each roster entry shaped
      "leagueName":  "...", "leagueCode": "...", "leagueId": 1,
      "matchdayId":  4,
      "teams": [
-       { "teamName":"...", "userName":"...", "teamNo":1, "position":1,
+       { "teamName":"...", "userName":"...", "teamNo":1, "accountId":"...", "position":1,
          "matchdayId":4, "budget":107.8, "transfersRemaining":0,
          "drivers":[{id,name,price,isCaptain,isMegaCaptain,isFinal}],
          "constructors":[…],

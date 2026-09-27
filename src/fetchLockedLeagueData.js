@@ -27,6 +27,7 @@
 const f1Api = require('./f1FantasyApiService');
 const { extractChipsUsed } = require('./chips');
 const { extractBudget } = require('./budget');
+const { deriveAccountId } = require('./accountId');
 const {
   getMatchdayRoster,
   resetCache: resetRosterCache,
@@ -86,6 +87,7 @@ function _resolveTransfersRemaining(teamData) {
 
 async function _fetchLockedTeamSnapshot(entry, teamName) {
   const teamNo = entry.team_no || 1;
+  const accountId = deriveAccountId(entry.user_guid);
 
   let oppData;
   try {
@@ -181,6 +183,7 @@ async function _fetchLockedTeamSnapshot(entry, teamName) {
     teamName,
     userName: entry.user_name,
     teamNo,
+    accountId,
     position: entry.cur_rank,
     matchdayId: lockedMatchdayId,
     budget: extractBudget(teamData),
