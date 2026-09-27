@@ -11,7 +11,9 @@ const ACCOUNT_ID_LENGTH = 16;
  */
 function deriveAccountId(userGuid) {
   const normalized =
-    typeof userGuid === 'string' ? userGuid.trim() : '';
+    typeof userGuid === 'string'
+      ? userGuid.trim().toLowerCase()
+      : '';
 
   if (!normalized) {
     return null;
