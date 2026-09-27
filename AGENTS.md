@@ -66,7 +66,7 @@ Both modes share four single-responsibility modules in `src/`:
 teams }`, where each team has `{ teamName, userName, accountId, teamNo, position,
 totalScore, raceScores, raceBudgets, chipsUsed: [{ name, gameDayId }] }`.
      `teamNo` mirrors the API's `team_no` field (1/2/3). `accountId` is a
-     stable opaque 12-hex SHA-256 prefix derived from `user_guid`; the raw
+     stable opaque 16-hex SHA-256 prefix derived from `user_guid`; the raw
      GUID is never persisted. `accountId + teamNo` is the canonical
      account-safe identity across leagues. `userName` is display data and
      can be shared by unrelated F1 accounts, so it must never be the sole
@@ -198,7 +198,7 @@ constructors: [...] }` with each roster entry shaped
      "leagueName":  "...", "leagueCode": "...", "leagueId": 1,
      "matchdayId":  4,
      "teams": [
-       { "teamName":"...", "userName":"...", "accountId":"7f3a91c24b10",
+       { "teamName":"...", "userName":"...", "accountId":"7f3a91c24b10e5d2",
          "teamNo":1, "position":1,
          "matchdayId":4, "budget":107.8, "transfersRemaining":0,
          "drivers":[{id,name,price,isCaptain,isMegaCaptain,isFinal}],
