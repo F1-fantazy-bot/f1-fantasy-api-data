@@ -11,6 +11,7 @@ const {
   resetCache: resetRosterCache,
 } = require('./rosterService');
 const { downloadDataFromAzureStorage } = require('./azureBlobStorageService');
+const { deriveAccountId } = require('./accountId');
 
 async function fetchAllLeaguesData() {
   console.log('1. Logging in to F1 Fantasy...');
@@ -82,7 +83,13 @@ async function fetchAllLeaguesData() {
   return { leagues: results, prices };
 }
 
-function _teamKey(userName, teamName) {
+function _teamKey(accountId, teamNo) {
+  if (!accountId || teamNo === null || teamNo === undefined) return null;
+
+  return `${accountId}::${teamNo}`;
+}
+
+function _legacyTeamKey(userName, teamName) {
   return `${userName || ''}::${teamName || ''}`;
 }
 
@@ -206,10 +213,17 @@ async function fetchSingleLeague(leagueCode) {
     if (priorLeague && Array.isArray(priorLeague.teams)) {
       for (const prior of priorLeague.teams) {
         if (prior?.raceBudgets && typeof prior.raceBudgets === 'object') {
-          priorRaceBudgetsByTeam.set(
-            _teamKey(prior.userName, prior.teamName),
-            prior.raceBudgets,
-          );
+          const canonicalKey = _teamKey(prior.accountId, prior.teamNo);
+          const legacyKey = _legacyTeamKey(prior.userName, prior.teamName);
+          if (canonicalKey) {
+            priorRaceBudgetsByTeam.set(canonicalKey, prior.raceBudgets);
+          }
+          // Backwards compatibility for blobs written before accountId existed.
+          // Do not overwrite an existing legacy key when duplicate display
+          // identities exist; old data is inherently ambiguous in that case.
+          if (!priorRaceBudgetsByTeam.has(legacyKey)) {
+            priorRaceBudgetsByTeam.set(legacyKey, prior.raceBudgets);
+          }
         }
       }
       console.log(
@@ -232,6 +246,7 @@ async function fetchSingleLeague(leagueCode) {
     const position = entry.cur_rank;
     const totalScore = entry.cur_points;
     const teamNo = entry.team_no || 1;
+    const accountId = deriveAccountId(entry.user_guid);
     let raceScores = {};
     let chipsUsed = [];
     let budget = null;
@@ -240,10 +255,11 @@ async function fetchSingleLeague(leagueCode) {
     let teamStateMatchdayId = null;
     let drivers = [];
     let constructors = [];
-    let raceBudgets = {
-      ...(priorRaceBudgetsByTeam.get(_teamKey(entry.user_name, teamName)) ||
-        {}),
-    };
+    const priorRaceBudgets =
+      priorRaceBudgetsByTeam.get(_teamKey(accountId, teamNo)) ||
+      priorRaceBudgetsByTeam.get(_legacyTeamKey(entry.user_name, teamName)) ||
+      {};
+    let raceBudgets = { ...priorRaceBudgets };
     let completedMatchdayIds = [];
 
     try {
@@ -366,6 +382,7 @@ async function fetchSingleLeague(leagueCode) {
       teamName,
       userName: entry.user_name,
       teamNo,
+      accountId,
       position,
       totalScore,
       raceScores,
@@ -377,6 +394,7 @@ async function fetchSingleLeague(leagueCode) {
       teamName,
       userName: entry.user_name,
       teamNo,
+      accountId,
       position,
       budget,
       transfersRemaining,
