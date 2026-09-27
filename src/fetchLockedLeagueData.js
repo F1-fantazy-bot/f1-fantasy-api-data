@@ -31,6 +31,7 @@ const {
   getMatchdayRoster,
   resetCache: resetRosterCache,
 } = require('./rosterService');
+const { deriveAccountId } = require('./accountId');
 
 function _isValidTeamState(teamData) {
   const entry = Array.isArray(teamData?.userTeam) ? teamData.userTeam[0] : null;
@@ -86,6 +87,7 @@ function _resolveTransfersRemaining(teamData) {
 
 async function _fetchLockedTeamSnapshot(entry, teamName) {
   const teamNo = entry.team_no || 1;
+  const accountId = deriveAccountId(entry.user_guid);
 
   let oppData;
   try {
@@ -180,6 +182,7 @@ async function _fetchLockedTeamSnapshot(entry, teamName) {
   return {
     teamName,
     userName: entry.user_name,
+    accountId,
     teamNo,
     position: entry.cur_rank,
     matchdayId: lockedMatchdayId,
