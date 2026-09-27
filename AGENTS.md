@@ -11,13 +11,14 @@ npm install
 npx playwright install chromium   # required once before first run
 npm start                         # weekly scrape — runs index.js end-to-end (needs .env)
 npm run scrape:locked             # locked-snapshot scrape (sets MODE=locked)
+npm test                           # node --test
 npm run lint                      # eslint .
 npm run lint:fix
 npm run format                    # prettier --write .
 ```
 
-There is no test suite and no eslint config file checked in — `npm run lint` currently
-uses ESLint defaults. Do not invent tests or a test runner unless asked.
+The small unit suite uses Node's built-in test runner (`npm test`). ESLint has no
+repo-local config file; `npm run lint` currently uses ESLint defaults.
 
 To iterate on login/scraping with a visible browser, set `F1_HEADLESS=false` in `.env`.
 
@@ -62,14 +63,15 @@ Both modes share four single-responsibility modules in `src/`:
    `null` if no matchday could be discovered (graceful: weekly run still
    succeeds with league blobs only).
    - `league`: `{ fetchedAt, leagueName, leagueCode, leagueId, memberCount,
-teams }`, where each team has `{ teamName, userName, teamNo, position,
+teams }`, where each team has `{ teamName, userName, accountId, teamNo, position,
 totalScore, raceScores, raceBudgets, chipsUsed: [{ name, gameDayId }] }`.
-     `teamNo` mirrors the API's `team_no` field (1/2/3) — F1 Fantasy lets each
-     account run up to 3 teams in a league, and this disambiguates them.
-     Combined with `userName` it gives a stable, rename-proof, league-agnostic
-     identifier (`{userName}_{teamNo}`) consumers can use to match the same
-     F1 Fantasy team across multiple leagues. Defaults to `1` when the API
-     omits the field (single-team users).
+     `teamNo` mirrors the API's `team_no` field (1/2/3). `accountId` is a
+     stable opaque 12-hex SHA-256 prefix derived from `user_guid`; the raw
+     GUID is never persisted. `accountId + teamNo` is the canonical
+     account-safe identity across leagues. `userName` is display data and
+     can be shared by unrelated F1 accounts, so it must never be the sole
+     account discriminator. `teamNo` defaults to `1` when the API omits
+     the field (single-team users).
      `raceBudgets` mirrors `raceScores` (keyed `matchday_<id>`) and stores the
      team's budget cap at the **start** of that race
      (`team_info.maxTeambal` — cost-cap-remaining + roster cost at lock
@@ -81,7 +83,7 @@ totalScore, raceScores, raceBudgets, chipsUsed: [{ name, gameDayId }] }`.
      Budget and transfers live only in the `teamsData` blob.
    - `teamsData`: `{ fetchedAt, leagueName, leagueCode, leagueId,
 matchdayId, teams }` where each team has `{ teamName, userName,
-teamNo, position, budget, transfersRemaining, drivers: [...],
+accountId, teamNo, position, budget, transfersRemaining, drivers: [...],
 constructors: [...] }` with each roster entry shaped
      `{ id, name, price, isCaptain, isMegaCaptain, isFinal }`.
      `teamNo` is the same `team_no` disambiguator described in the
@@ -196,7 +198,8 @@ constructors: [...] }` with each roster entry shaped
      "leagueName":  "...", "leagueCode": "...", "leagueId": 1,
      "matchdayId":  4,
      "teams": [
-       { "teamName":"...", "userName":"...", "teamNo":1, "position":1,
+       { "teamName":"...", "userName":"...", "accountId":"7f3a91c24b10",
+         "teamNo":1, "position":1,
          "matchdayId":4, "budget":107.8, "transfersRemaining":0,
          "drivers":[{id,name,price,isCaptain,isMegaCaptain,isFinal}],
          "constructors":[…],
