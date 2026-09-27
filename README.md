@@ -72,7 +72,7 @@ extra API traffic.
     {
       "teamName": "Team A",
       "userName": "user_a",
-      "accountId": "7f3a91c24b10",
+      "accountId": "7f3a91c24b10e5d2",
       "teamNo": 1,
       "position": 1,
       "totalScore": 500,
@@ -85,7 +85,7 @@ extra API traffic.
 ```
 
 Every team record carries an opaque `accountId`, derived deterministically as
-the first 12 hexadecimal characters of SHA-256(`user_guid`). The raw F1
+the first 16 hexadecimal characters of SHA-256(`user_guid`). The raw F1
 account GUID is never persisted. Consumers should use `accountId + teamNo`
 for account-safe identity; `userName` is display data and is not guaranteed
 to be unique across different F1 accounts.
@@ -110,7 +110,7 @@ season), the most-recently-completed matchday is used instead.
     {
       "teamName": "Team A",
       "userName": "user_a",
-      "accountId": "7f3a91c24b10",
+      "accountId": "7f3a91c24b10e5d2",
       "teamNo": 1,
       "position": 1,
       "budget": 105.8,
