@@ -12,12 +12,13 @@ npx playwright install chromium   # required once before first run
 npm start                         # weekly scrape — runs index.js end-to-end (needs .env)
 npm run scrape:locked             # locked-snapshot scrape (sets MODE=locked)
 npm run lint                      # eslint .
+npm test                          # node:test identity and scraper regressions
 npm run lint:fix
 npm run format                    # prettier --write .
 ```
 
-There is no test suite and no eslint config file checked in — `npm run lint` currently
-uses ESLint defaults. Do not invent tests or a test runner unless asked.
+ESLint uses `.eslintrc.json`; `npm test` covers account ID derivation,
+safe historical-budget joins, and the multi-team `v: teamNo` API discriminator.
 
 To iterate on login/scraping with a visible browser, set `F1_HEADLESS=false` in `.env`.
 
@@ -66,7 +67,7 @@ teams }`, where each team has `{ teamName, userName, teamNo, accountId, position
 totalScore, raceScores, raceBudgets, chipsUsed: [{ name, gameDayId }] }`.
      `teamNo` mirrors the API's `team_no` field (1/2/3). `accountId` is
      a stable 12-hex-character SHA-256-derived identifier based on the
-     leaderboard entry's `user_guid`; the raw GUID is not persisted. Consumers
+     leaderboard entry's case-normalized, validated `user_guid`; the raw GUID is not persisted. Consumers
      should combine `userName + teamNo + accountId` for a readable,
      league-agnostic identity. This is required because two different F1
      accounts can share the same display `userName` and both have
@@ -198,7 +199,7 @@ constructors: [...] }` with each roster entry shaped
      "leagueName":  "...", "leagueCode": "...", "leagueId": 1,
      "matchdayId":  4,
      "teams": [
-       { "teamName":"...", "userName":"...", "teamNo":1, "position":1,
+       { "teamName":"...", "userName":"...", "teamNo":1, "accountId":"...", "position":1,
          "matchdayId":4, "budget":107.8, "transfersRemaining":0,
          "drivers":[{id,name,price,isCaptain,isMegaCaptain,isFinal}],
          "constructors":[…],

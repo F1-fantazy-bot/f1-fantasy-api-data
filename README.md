@@ -55,10 +55,16 @@ Two blobs are uploaded per league under `leagues/<leagueCode>/`:
 
 Each team also carries `teamNo` and `accountId`. `accountId` is a stable
 12-hex-character SHA-256-derived identifier based on F1 Fantasy's
-`user_guid`; the raw GUID is not persisted. Consumers should use
+trimmed, case-normalized `user_guid`; invalid or missing GUIDs produce `null`,
+and the raw GUID is not persisted. Consumers should use
 `userName + teamNo + accountId` for human-readable canonical identity.
 This keeps two distinct accounts with the same display name and `team_no`
 separate while remaining stable across leagues.
+The stable logical key is `accountId + teamNo`; a username may change.
+`teamName` is for display and can only help match unambiguous older snapshots.
+Historical race budgets with an ambiguous legacy display identity are not reused.
+The same `accountId` is included in current `teams-data.json` and newly
+captured `locked/matchday_N.json` entries.
 
 
 `raceBudgets` mirrors `raceScores` and records each team's budget cap at the

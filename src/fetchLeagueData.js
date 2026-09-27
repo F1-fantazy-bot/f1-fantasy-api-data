@@ -12,6 +12,7 @@ const {
 } = require('./rosterService');
 const { downloadDataFromAzureStorage } = require('./azureBlobStorageService');
 const { deriveAccountId } = require('./accountId');
+const { indexPriorRaceBudgets } = require('./priorRaceBudgets');
 
 async function fetchAllLeaguesData() {
   console.log('1. Logging in to F1 Fantasy...');
@@ -81,16 +82,6 @@ async function fetchAllLeaguesData() {
   }
 
   return { leagues: results, prices };
-}
-
-function _teamKey(accountId, teamNo) {
-  if (!accountId || teamNo === null || teamNo === undefined) return null;
-
-  return `${accountId}::${teamNo}`;
-}
-
-function _legacyTeamKey(userName, teamName) {
-  return `${userName || ''}::${teamName || ''}`;
 }
 
 function _isValidTeamState(teamData) {
@@ -205,29 +196,15 @@ async function fetchSingleLeague(leagueCode) {
   const leaderboard = await f1Api.getLeagueLeaderboard(leagueId);
   console.log(`   ${leaderboard.length} teams`);
 
-  let priorRaceBudgetsByTeam = new Map();
+  let priorTeams = [];
 
   try {
     const priorLeague = await downloadDataFromAzureStorage(leagueCode);
 
     if (priorLeague && Array.isArray(priorLeague.teams)) {
-      for (const prior of priorLeague.teams) {
-        if (prior?.raceBudgets && typeof prior.raceBudgets === 'object') {
-          const canonicalKey = _teamKey(prior.accountId, prior.teamNo);
-          const legacyKey = _legacyTeamKey(prior.userName, prior.teamName);
-          if (canonicalKey) {
-            priorRaceBudgetsByTeam.set(canonicalKey, prior.raceBudgets);
-          }
-          // Backwards compatibility for blobs written before accountId existed.
-          // Do not overwrite an existing legacy key when duplicate display
-          // identities exist; old data is inherently ambiguous in that case.
-          if (!priorRaceBudgetsByTeam.has(legacyKey)) {
-            priorRaceBudgetsByTeam.set(legacyKey, prior.raceBudgets);
-          }
-        }
-      }
+      priorTeams = priorLeague.teams;
       console.log(
-        `   Loaded prior raceBudgets for ${priorRaceBudgetsByTeam.size} teams`,
+        `   Loaded prior raceBudgets for ${priorTeams.length} teams`,
       );
     }
   } catch (err) {
@@ -239,6 +216,7 @@ async function fetchSingleLeague(leagueCode) {
   console.log('   Fetching per-race scores...');
   const teams = [];
   const teamsComposition = [];
+  const findPriorRaceBudgets = indexPriorRaceBudgets(priorTeams, leaderboard);
   let leagueMatchdayId = null;
 
   for (const entry of leaderboard) {
@@ -255,10 +233,7 @@ async function fetchSingleLeague(leagueCode) {
     let teamStateMatchdayId = null;
     let drivers = [];
     let constructors = [];
-    const priorRaceBudgets =
-      priorRaceBudgetsByTeam.get(_teamKey(accountId, teamNo)) ||
-      priorRaceBudgetsByTeam.get(_legacyTeamKey(entry.user_name, teamName)) ||
-      {};
+    const priorRaceBudgets = findPriorRaceBudgets(entry);
     let raceBudgets = { ...priorRaceBudgets };
     let completedMatchdayIds = [];
 
@@ -444,4 +419,4 @@ async function fetchSingleLeague(leagueCode) {
   return { league, teamsData };
 }
 
-module.exports = { fetchAllLeaguesData };
+module.exports = { fetchAllLeaguesData, fetchSingleLeague };
