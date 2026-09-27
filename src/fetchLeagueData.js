@@ -11,6 +11,7 @@ const {
   resetCache: resetRosterCache,
 } = require('./rosterService');
 const { downloadDataFromAzureStorage } = require('./azureBlobStorageService');
+const { deriveAccountId } = require('./accountId');
 
 async function fetchAllLeaguesData() {
   console.log('1. Logging in to F1 Fantasy...');
@@ -82,8 +83,26 @@ async function fetchAllLeaguesData() {
   return { leagues: results, prices };
 }
 
-function _teamKey(userName, teamName) {
+function _legacyTeamKey(userName, teamName) {
   return `${userName || ''}::${teamName || ''}`;
+}
+
+function _teamKey({
+  accountId,
+  teamNo,
+  userName,
+  teamName,
+} = {}) {
+  if (
+    accountId &&
+    teamNo !== null &&
+    teamNo !== undefined &&
+    teamNo !== ''
+  ) {
+    return `${accountId}::${teamNo}`;
+  }
+
+  return _legacyTeamKey(userName, teamName);
 }
 
 function _isValidTeamState(teamData) {
@@ -206,10 +225,19 @@ async function fetchSingleLeague(leagueCode) {
     if (priorLeague && Array.isArray(priorLeague.teams)) {
       for (const prior of priorLeague.teams) {
         if (prior?.raceBudgets && typeof prior.raceBudgets === 'object') {
-          priorRaceBudgetsByTeam.set(
-            _teamKey(prior.userName, prior.teamName),
-            prior.raceBudgets,
-          );
+          const canonicalKey = _teamKey(prior);
+          priorRaceBudgetsByTeam.set(canonicalKey, prior.raceBudgets);
+
+          // Keep the legacy key during the transition so the first scrape
+          // after accountId rollout can reuse old history where it is
+          // unambiguous. Canonical accountId+teamNo always wins when present.
+          const legacyKey = _legacyTeamKey(prior.userName, prior.teamName);
+          if (
+            legacyKey !== canonicalKey &&
+            !priorRaceBudgetsByTeam.has(legacyKey)
+          ) {
+            priorRaceBudgetsByTeam.set(legacyKey, prior.raceBudgets);
+          }
         }
       }
       console.log(
@@ -232,6 +260,7 @@ async function fetchSingleLeague(leagueCode) {
     const position = entry.cur_rank;
     const totalScore = entry.cur_points;
     const teamNo = entry.team_no || 1;
+    const accountId = deriveAccountId(entry.user_guid);
     let raceScores = {};
     let chipsUsed = [];
     let budget = null;
@@ -240,10 +269,20 @@ async function fetchSingleLeague(leagueCode) {
     let teamStateMatchdayId = null;
     let drivers = [];
     let constructors = [];
-    let raceBudgets = {
-      ...(priorRaceBudgetsByTeam.get(_teamKey(entry.user_name, teamName)) ||
-        {}),
-    };
+    const priorRaceBudgets =
+      priorRaceBudgetsByTeam.get(
+        _teamKey({
+          accountId,
+          teamNo,
+          userName: entry.user_name,
+          teamName,
+        }),
+      ) ||
+      priorRaceBudgetsByTeam.get(
+        _legacyTeamKey(entry.user_name, teamName),
+      ) ||
+      {};
+    let raceBudgets = { ...priorRaceBudgets };
     let completedMatchdayIds = [];
 
     try {
@@ -365,6 +404,7 @@ async function fetchSingleLeague(leagueCode) {
     teams.push({
       teamName,
       userName: entry.user_name,
+      accountId,
       teamNo,
       position,
       totalScore,
@@ -376,6 +416,7 @@ async function fetchSingleLeague(leagueCode) {
     teamsComposition.push({
       teamName,
       userName: entry.user_name,
+      accountId,
       teamNo,
       position,
       budget,
