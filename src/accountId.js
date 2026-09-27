@@ -12,7 +12,11 @@ function deriveAccountId(userGuid) {
     return null;
   }
   const normalizedGuid = userGuid.trim().toLowerCase();
-  if (!/^(?:[0-9a-f]{32}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/.test(normalizedGuid)) {
+  // F1 treats this as an opaque account identifier. Its format is not
+  // guaranteed to be a UUID, so validating it as one loses real accounts.
+  if (!normalizedGuid || Array.from(normalizedGuid).some(
+    (char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127,
+  )) {
     return null;
   }
 

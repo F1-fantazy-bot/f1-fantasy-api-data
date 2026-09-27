@@ -225,6 +225,9 @@ async function fetchSingleLeague(leagueCode) {
     const totalScore = entry.cur_points;
     const teamNo = entry.team_no || 1;
     const accountId = deriveAccountId(entry.user_guid);
+    if (!accountId) {
+      throw new Error(`Missing valid account identifier for ${teamName} in league ${leagueCode}; refusing to upload incomplete team identities`);
+    }
     let raceScores = {};
     let chipsUsed = [];
     let budget = null;
