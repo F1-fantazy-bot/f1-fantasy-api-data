@@ -9,5 +9,9 @@ test('account ID is deterministic, case normalized, opaque and safe', () => {
   assert.match(id, /^[a-f0-9]{12}$/);
   assert.equal(deriveAccountId(null), null);
   assert.equal(deriveAccountId('   '), null);
-  assert.equal(deriveAccountId('not-a-guid'), null);
+  assert.equal(deriveAccountId(123), null);
+  assert.equal(deriveAccountId('opaque\u0000identifier'), null);
+  assert.match(deriveAccountId('  F1-user-guid/opaque_Account:42 '), /^[a-f0-9]{12}$/);
+  assert.equal(deriveAccountId('f1-user-guid/opaque_account:42'),
+    deriveAccountId('  F1-user-guid/opaque_Account:42 '));
 });

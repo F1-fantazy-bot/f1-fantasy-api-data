@@ -88,6 +88,9 @@ function _resolveTransfersRemaining(teamData) {
 async function _fetchLockedTeamSnapshot(entry, teamName) {
   const teamNo = entry.team_no || 1;
   const accountId = deriveAccountId(entry.user_guid);
+  if (!accountId) {
+    throw new Error(`Missing valid account identifier for ${teamName}; refusing to overwrite a locked snapshot with incomplete team identities`);
+  }
 
   let oppData;
   try {
