@@ -19,7 +19,8 @@
     "deploy:scheduler-locked": "az deployment group create --resource-group f1-fantazy-bot --name \"api-data-scheduler-locked-${DEPLOYMENT_SUFFIX:-manual-$(date +%s)}\" --template-file infra/scheduler-locked/azuredeploy.json --parameters @infra/scheduler-locked/azuredeploy.parameters.json --output none --only-show-errors",
     "deploy:grant-runner-msi-locked": "LOGIC_APP_NAME=f1-fantasy-api-data-runner-locked ACI_NAME=f1-fantasy-api-data-aci-locked bash scripts/grant-runner-msi.sh",
     "deploy:logicapps-locked": "npm run deploy:runner-locked && npm run deploy:grant-runner-msi-locked && npm run deploy:scheduler-locked",
-    "deploy:locked": "npm run deploy:aci-locked && npm run deploy:logicapps-locked"
+    "deploy:locked": "npm run deploy:aci-locked && npm run deploy:logicapps-locked",
+    "test": "node --test"
   },
   "keywords": [],
   "author": "Doron Kilzi",
