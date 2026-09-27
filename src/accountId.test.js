@@ -14,6 +14,13 @@ test('deriveAccountId is stable, opaque, and account-specific', () => {
   assert.equal(first.includes('11111111'), false);
 });
 
+test('deriveAccountId normalizes GUID casing and whitespace', () => {
+  assert.equal(
+    deriveAccountId(' ABCDEF12-3456-7890-ABCD-EF1234567890 '),
+    deriveAccountId('abcdef12-3456-7890-abcd-ef1234567890'),
+  );
+});
+
 test('deriveAccountId returns null for a missing GUID', () => {
   assert.equal(deriveAccountId(null), null);
   assert.equal(deriveAccountId('   '), null);
