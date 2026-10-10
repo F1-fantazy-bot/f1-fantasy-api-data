@@ -5,6 +5,7 @@
 const f1Api = require('./f1FantasyApiService');
 const { extractChipsUsed } = require('./chips');
 const { extractBudget } = require('./budget');
+const { extractTransfersRemaining } = require('./transfers');
 const {
   getMatchdayRoster,
   getPlayersByMatchday,
@@ -294,15 +295,7 @@ async function fetchSingleLeague(leagueCode) {
 
         if (!leagueMatchdayId) leagueMatchdayId = teamStateMatchdayId;
 
-        const teamEntry = Array.isArray(fetched.teamData?.userTeam)
-          ? fetched.teamData.userTeam[0]
-          : null;
-        const subsLeft =
-          teamEntry?.team_info?.userSubsleft ?? teamEntry?.usersubsleft;
-
-        if (typeof subsLeft === 'number' && Number.isFinite(subsLeft)) {
-          transfersRemaining = subsLeft;
-        }
+        transfersRemaining = extractTransfersRemaining(fetched.teamData);
 
         try {
           const rosterMap = await getMatchdayRoster(teamStateMatchdayId);

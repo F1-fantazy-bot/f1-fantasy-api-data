@@ -27,6 +27,7 @@
 const f1Api = require('./f1FantasyApiService');
 const { extractChipsUsed } = require('./chips');
 const { extractBudget } = require('./budget');
+const { extractTransfersRemaining } = require('./transfers');
 const { deriveAccountId } = require('./accountId');
 const {
   getMatchdayRoster,
@@ -76,13 +77,6 @@ function _extractRosterItems(teamData, rosterMap) {
   }
 
   return { drivers, constructors };
-}
-
-function _resolveTransfersRemaining(teamData) {
-  const teamEntry = Array.isArray(teamData?.userTeam) ? teamData.userTeam[0] : null;
-  const subsLeft = teamEntry?.team_info?.userSubsleft ?? teamEntry?.usersubsleft;
-
-  return typeof subsLeft === 'number' && Number.isFinite(subsLeft) ? subsLeft : null;
 }
 
 async function _fetchLockedTeamSnapshot(entry, teamName) {
@@ -190,7 +184,7 @@ async function _fetchLockedTeamSnapshot(entry, teamName) {
     position: entry.cur_rank,
     matchdayId: lockedMatchdayId,
     budget: extractBudget(teamData),
-    transfersRemaining: _resolveTransfersRemaining(teamData),
+    transfersRemaining: extractTransfersRemaining(teamData),
     drivers,
     constructors,
     chipsUsed,

@@ -13,6 +13,26 @@ rosterService.getMatchdayRoster = async () => new Map([['42', { name: 'Norris', 
 const { fetchSingleLeague } = require('./fetchLeagueData');
 const { _fetchLockedTeamSnapshot } = require('./fetchLockedLeagueData');
 
+test('weekly and locked scrapes retain a string planning allowance over root zero', async () => {
+  const entry = { user_name: 'Doron Kilzi', team_name: 'kilzid', team_no: 1,
+    user_guid: 'test-account', cur_rank: 1, cur_points: 10 };
+  f1Api.getLeagueInfo = async () => ({ leagueId: 10, leagueName: 'Test', memberCount: 1 });
+  f1Api.getLeagueLeaderboard = async () => [entry];
+  f1Api.getOpponentGameDays = async () => ({ mdDetails: { 1: { pts: 10 } } });
+  f1Api.getOpponentTeam = async () => ({ userTeam: [{
+    playerid: [{ id: 42, playerpostion: 1, iscaptain: 1 }],
+    team_info: { teamVal: 30, maxTeambal: 100, userSubsleft: '2' }, usersubsleft: 0,
+  }] });
+  try {
+    const weekly = await fetchSingleLeague('ABC');
+    assert.equal(weekly.teamsData.teams[0].transfersRemaining, 2);
+    const locked = await _fetchLockedTeamSnapshot(entry, 'kilzid');
+    assert.equal(locked.transfersRemaining, 2);
+  } finally {
+    for (const [name, original] of Object.entries(originals)) f1Api[name] = original;
+  }
+});
+
 test('weekly and locked team blobs distinguish accounts and use team_no as opponent v', async () => {
   const entries = [
     { user_name: 'Tom Kregenbild', team_name: 'NoNoItsSoNotRightMikeyNO', team_no: 1, user_guid: 'f1-account/opaque-001', cur_rank: 1, cur_points: 100 },

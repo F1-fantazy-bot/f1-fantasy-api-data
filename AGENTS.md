@@ -115,7 +115,12 @@ constructors: [...] }` with each roster entry shaped
      (the subtraction always yielded 0 because `teamVal ≈ Σ_prices`); the
      field was repurposed rather than renamed because `budget` is the
      natural name for "the user's spending limit". `transfersRemaining`
-     is `userTeam[0].usersubsleft` from the same response. Driver/constructor
+     is extracted by `src/transfers.js`, preferring
+     `userTeam[0].team_info.userSubsleft` (the planning allowance) over
+     the legacy root `usersubsleft` field, which can be zero for upcoming
+     matchdays. Both numeric values and numeric strings are accepted;
+     missing/malformed counts stay `null`, and negative counts are preserved
+     for locked transfer penalties. Weekly and locked scrapes share this helper. Driver/constructor
      names and prices come from `/feeds/drivers/{mdid}_en.json` (a single feed
      containing both — `PositionName` of `"DRIVER"` or `"CONSTRUCTOR"` tells
      them apart) resolved through `src/rosterService.js`, which memoizes the
