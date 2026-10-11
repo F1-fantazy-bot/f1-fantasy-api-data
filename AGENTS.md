@@ -18,7 +18,10 @@ npm run format                    # prettier --write .
 ```
 
 ESLint uses `.eslintrc.json`; `npm test` covers account ID derivation,
-safe historical-budget joins, and the multi-team `v: teamNo` API discriminator.
+safe historical-budget joins, the multi-team `v: teamNo` API discriminator,
+current race selection, available/unknown transfer counts, current-price feeds,
+chip-aware race-start transfer calculations from fresh archived API data,
+and weekly diagnostics (concise reporting, redaction, and Telegram formatting).
 
 To iterate on login/scraping with a visible browser, set `F1_HEADLESS=false` in `.env`.
 
@@ -29,7 +32,8 @@ To iterate on login/scraping with a visible browser, set `F1_HEADLESS=false` in 
 - `MODE=weekly` → runs `fetchAllLeaguesData()` and uploads
   `league-standings.json` + `teams-data.json` per league, plus one
   global `prices.json` at the container root. Used by the
-  Monday Logic App scheduler. **This path is unchanged.**
+  Monday/Thursday Logic App scheduler. The canonical current race is selected
+  once from live F1 state; historical opponent state cannot select old prices.
 - `MODE=locked` → runs `fetchAllLeaguesLocked()` and uploads only
   `leagues/{code}/locked/matchday_{N}.json`, one blob per (league,
   matchday). Used by the locked-snapshot Logic App scheduler that fires
@@ -39,29 +43,45 @@ Why two modes: the locked snapshot must be captured between **lock**
 (start of qualifying / sprint qualifying) and **race end**. Once the race
 ends F1 Fantasy auto-reverts Limitless, so a post-race fetch of the same
 matchday would silently overwrite the temporary mega-squad. The Monday
-weekly scrape captures "next-week planning" view (upcoming md = N+1) and
+weekly scrape captures the current planning race from live F1 state and
 must keep its current cadence.
 
-Both modes share four single-responsibility modules in `src/`:
+The scraper modules in `src/` are:
 
 1. `f1FantasyApiService.js` — **the only module that talks to F1**. Holds module-level
    `browser` / `context` / `page` / `sessionData` singletons. `init()` launches Chromium,
    performs a human-like login (required to bypass Distil bot detection — do not replace
    with a plain HTTP client), then calls `/services/session/login` to obtain the GUID
-   used by every subsequent request. `close()` must be called in a `finally` block.
+   used by every subsequent request. The authenticated team path is
+   `getteam/1/{teamNo}/{race}/1` (operation type precedes team number).
+   `close()` must be called in a `finally` block.
 2. `fetchLeagueData.js` — orchestration layer. Calls `getLeagues()`, filters to
    `league_type === 'Private'`, then for each league pulls info → leaderboard →
    per-team per-matchday scores via `getOpponentGameDays`. For each team it also
-   extracts chip usage via `src/chips.js` (`extractChipsUsed`), budget and
-   transfers via `getOpponentTeam`, and resolves the team's drivers and
-   constructors via `src/rosterService.js`. After the per-league loop it
-   also resolves the global driver/constructor price list **once** for
-   the upcoming matchday via `rosterService.getPlayersByMatchday`
-   (zero extra HTTP — reuses the memoized fetch already populated by
-   the per-team roster resolution). Returns
-   `{ leagues: [{ league, teamsData }, …], prices }` where `prices` is
-   `null` if no matchday could be discovered (graceful: weekly run still
-   succeeds with league blobs only).
+   extracts chip usage via `src/chips.js` (`extractChipsUsed`). The weekly
+   helper `weeklyState.js` resolves the canonical race once from
+   `getWebConfig().Data.constraints.GamedayId` (race number, NOT the config's
+   sub-session `MatchdayId`), with `getUserGameDays().cumdid` as fallback.
+   If neither is valid the run fails rather than guessing from score history.
+   Logged-in-account entries match leaderboard `social_id` against session
+   `SocialId` (falling back to the exact `-0-<SocialId>` GUID suffix when
+   the field is absent) and use `getUserTeam`; other teams use
+   `getOpponentTeam` with `v: teamNo`. Current and historical responses must
+   match the requested race and team number and contain a seven-player roster.
+   Historical fallback is only for explicitly labeled last-known rosters;
+   current budgets are null when current state is unavailable. Transfer
+   metadata is validated independently of roster size (Final Fix archives
+   can contain eight rows). `transferAllowance.js` prefers live counts and
+   otherwise calculates a labeled race-start allowance from F1's freshly
+   requested immediately previous race, never saved weekly/locked blobs.
+   It loads base/carry limits from `getRaceSchedule()` and chip IDs from
+   web config once per run. Limitless/Wildcard reset carry-over; other
+   chips preserve normal carry-over. Only the race's active `boosterid`
+   is used, never stale season-level flags. Missing rules, ambiguous chips,
+   or missing/mismatched previous-race metadata leave the count unknown.
+   All roster and global prices use the canonical race's memoized feed.
+   Returns `{ leagues: [{ league, teamsData }, …], prices }`; unavailable or
+   incomplete current prices abort the run before uploads.
    - `league`: `{ fetchedAt, leagueName, leagueCode, leagueId, memberCount,
 teams }`, where each team has `{ teamName, userName, teamNo, accountId, position,
 totalScore, raceScores, raceBudgets, chipsUsed: [{ name, gameDayId }] }`.
@@ -86,18 +106,27 @@ totalScore, raceScores, raceBudgets, chipsUsed: [{ name, gameDayId }] }`.
      Budget and transfers live only in the `teamsData` blob.
    - `teamsData`: `{ fetchedAt, leagueName, leagueCode, leagueId,
 matchdayId, teams }` where each team has `{ teamName, userName,
-teamNo, position, budget, transfersRemaining, drivers: [...],
-constructors: [...] }` with each roster entry shaped
+teamNo, position, budget, transfersRemaining, transfersStatus,
+transfersSourceMatchdayId, teamStateStatus,
+teamStateMatchdayId, drivers: [...], constructors: [...] }` with each roster entry shaped
      `{ id, name, price, isCaptain, isMegaCaptain, isFinal }`.
      `teamNo` and `accountId` are the same identity fields described in
      the `league` shape above.
-     `matchdayId` is the **upcoming** matchday (= last-completed + 1,
-     with graceful fallback to the last-completed matchday when no
-     upcoming data is returned, e.g. at end of season). Reading the
-     upcoming matchday rather than the last completed one matters
-     because driver/constructor prices change every week, transfers
-     accrue for the next race, and teams that played the Limitless
-     chip automatically revert to their pre-chip squad after the race.
+     `matchdayId` is the canonical current/planning race. It never moves
+     backward merely because opponent data is unavailable. Each team includes
+     `teamStateStatus` (`current`, `historical`, or `unavailable`) and
+     `teamStateMatchdayId` (actual roster-source race, or null). Historical
+     roster prices still use the canonical race feed, but the roster, captain,
+     and chip-reversion state cannot be claimed current. Current budgets
+     remain null for historical/unavailable state. Transfers have their own
+     `transfersStatus`: `live`, `calculated-race-start`, `unlimited`, or
+     `unknown`; `transfersSourceMatchdayId` identifies the current race for
+     live/unlimited counts, previous race for calculations, or null when
+     unknown. Unlimited counts are null and must not be treated as unknown.
+     Consumers must honor both status fields: calculations do not reflect
+     private current-week changes, and old rosters cannot provide a current
+     budget. First-ever team weeks are explicitly unlimited when verified;
+     previous first-week counters cannot establish normal carry-over.
      Chip usage comes from top-level `is<Name>taken` / `<name>takengd` flags on
      the opponent game-days response (see `src/chips.js`). `budget` is the
      **cost cap going into the upcoming matchday** — the user's spending
@@ -106,7 +135,7 @@ constructors: [...] }` with each roster entry shaped
      `100` (season-start cap); later matchdays grow as the roster
      appreciates. Consumers compute cost-cap-remaining as
      `budget − Σ_prices`. `null` when the upstream API didn't return a
-     value (rare; consumers should treat as unknown). The same value is
+     value or current team state is unavailable (treat as unknown). The same value is
      also mirrored into `raceBudgets["matchday_${matchdayId}"]` on the
      matching `league-standings.json` entry, so the two blobs agree on
      the start-of-week cap. Historical note: prior to the rename `budget`
@@ -115,7 +144,10 @@ constructors: [...] }` with each roster entry shaped
      (the subtraction always yielded 0 because `teamVal ≈ Σ_prices`); the
      field was repurposed rather than renamed because `budget` is the
      natural name for "the user's spending limit". `transfersRemaining`
-     is `userTeam[0].usersubsleft` from the same response. Driver/constructor
+     prefers `userTeam[0].team_info.userSubsleft`, falling back to
+     `userTeam[0].usersubsleft` from the same response. Negative live values
+     indicate an overdrawn allowance and are clamped to zero free transfers,
+     matching the F1 My Team UI. Driver/constructor
      names and prices come from `/feeds/drivers/{mdid}_en.json` (a single feed
      containing both — `PositionName` of `"DRIVER"` or `"CONSTRUCTOR"` tells
      them apart) resolved through `src/rosterService.js`, which memoizes the
@@ -164,12 +196,23 @@ constructors: [...] }` with each roster entry shaped
    the container root rather than under `leagues/<code>/`. Written only
    by the weekly path; the locked path does not re-emit `prices.json`
    because prices don't change between lock and race end.
+
 4. `telegramService.js` — singleton instance (`module.exports = new TelegramService()`).
    Sends success to `LOG_CHANNEL_ID` (with separate `notifySuccess` /
    `notifySuccessLocked` messages so the channel makes the mode obvious),
    errors to **both** log and errors channels. Messages to those channels
    are auto-prefixed with `F1_FANTASY_API: `. No-ops with a warning if
    `TELEGRAM_BOT_TOKEN` is missing.
+   Weekly warnings and swallowed per-team/per-league errors are collected by
+   `weeklyDiagnostics.js`. Telegram receives a concise problem/impact summary
+   (current race, unavailable team count, and unknown/stale data), sent only
+   to the existing errors/bugs channel in plain text. Detailed redacted issue
+   counts, run ID, API metadata, and up to three examples per issue remain in
+   service logs via `formatDetails()`. Healthy runs produce no warning.
+   `notifySuccess` also receives the team snapshots and reports partial data
+   when current state, transfers, budgets, or roster prices are incomplete.
+   Previews use `notifyWeeklyDiagnostics(report, { preview: true })`; disable
+   uploads and ordinary notifications in a local harness for preview runs.
 
 5. `fetchLockedLeagueData.js` — locked-snapshot orchestration. Mirrors a
    minimal subset of `fetchLeagueData.js`: for each private league it

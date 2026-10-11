@@ -12,7 +12,7 @@ The container has two modes, switched via the `MODE` env var:
   budget, transfers, and chips used. Writes two blobs per league:
   `leagues/{code}/league-standings.json` (history + chips) and
   `leagues/{code}/teams-data.json` (current roster snapshot for the
-  upcoming matchday). Scheduled for **Monday and Thursday at 03:00 UTC** (Logic App scheduler).
+  current planning race). Scheduled for **Monday and Thursday at 03:00 UTC** (Logic App scheduler).
 
 - **`MODE=locked`** (`npm run scrape:locked`) — Captures the **just-locked**
   matchday's roster, captain, budget, transfers and chips for every team.
@@ -68,7 +68,6 @@ Historical race budgets with an ambiguous legacy display identity are not reused
 The same `accountId` is included in current `teams-data.json` and newly
 captured `locked/matchday_N.json` entries.
 
-
 `raceBudgets` mirrors `raceScores` and records each team's budget cap at the
 **start** of each race (`team_info.maxTeambal` — cost-cap-remaining + roster
 cost at lock prices). For matchday 1 this is always `100` (season-start cap).
@@ -103,11 +102,47 @@ extra API traffic.
 ### `teams-data.json` — per-team composition
 
 Focused view for rendering team rosters without pulling the full league blob.
-`matchdayId` is the **upcoming** matchday — `budget`, `transfersRemaining`,
-and the drivers/constructors lists reflect the team state going into the
-next race (after any Limitless chip reverts, with the prices that apply
-for that race). When the upcoming matchday is unavailable (e.g. end of
-season), the most-recently-completed matchday is used instead.
+`matchdayId` is the **current planning race**, resolved from live F1 game
+state rather than inferred from score history. Global and team roster prices
+always use that race's feed.
+
+Owned teams use the authenticated current-team API. Each team includes
+`teamStateStatus` (`current`, `historical`, or `unavailable`) and
+`teamStateMatchdayId` (the actual roster-source race, or `null`). When F1
+withholds current opponent state, a last-known roster can be retained with
+`historical` status and current prices, but `budget` remains `null`.
+Consumers must honor the roster status;
+a historical roster may differ after transfers or Limitless reversion.
+
+Current transfers prefer `team_info.userSubsleft` over top-level
+`usersubsleft`; these can disagree. Unknown current race or unavailable
+current price feed fails the weekly run before uploads. Partial team data is
+reported as partial, with a concise warning in the Telegram bugs channel and
+detailed diagnostics in the service logs.
+
+When live transfers are unavailable, the weekly service queries F1's archived
+API for the **immediately previous race** and validates its race/team identity.
+It never calculates from saved weekly or locked snapshots, including the
+faulty Singapore output. The current schedule supplies the base allowance and
+carry limit. Limitless/Wildcard in that previous race reset carry-over; other
+chips allow at most one unused transfer to carry (currently 2 + up to 1).
+Final Fix's extra archived roster row does not invalidate transfer metadata.
+
+`transfersRemaining` must be interpreted with these fields:
+
+| `transfersStatus`       | Meaning                                                                           | `transfersSourceMatchdayId` |
+| ----------------------- | --------------------------------------------------------------------------------- | --------------------------- |
+| `live`                  | Current API count, with negative free transfers clamped to zero                   | Current race                |
+| `calculated-race-start` | Calculated starting allowance; private changes this week are unknown              | Previous race               |
+| `unlimited`             | A verified current Limitless/Wildcard or first team week; numeric count is `null` | Current race                |
+| `unknown`               | Missing/ambiguous data or rules; numeric count is `null`                          | `null`                      |
+
+Only the archived race's active `boosterid` determines a chip reset, never
+season-level flags. Missing previous-race data cannot be replaced by an older
+race or a guessed default. A previous first-team-week counter is not treated
+as ordinary unused free transfers. Calculated values can coexist with a
+historical/unavailable roster and must not be presented as live remaining
+transfers. Telegram summaries explicitly identify these estimates.
 
 ```json
 {
@@ -125,6 +160,10 @@ season), the most-recently-completed matchday is used instead.
       "position": 1,
       "budget": 105.8,
       "transfersRemaining": 3,
+      "transfersStatus": "live",
+      "transfersSourceMatchdayId": 3,
+      "teamStateStatus": "current",
+      "teamStateMatchdayId": 3,
       "drivers": [
         {
           "id": "124",

@@ -261,7 +261,8 @@ async function getUserGameDays(teamNo = 1) {
 
 /** Get the user's team composition for a specific matchday */
 async function getUserTeam(teamNo = 1, matchdayId) {
-  return _apiGet(`/services/user/gameplay/${_guid()}/getteam/${teamNo}/1/${matchdayId}/1`);
+  // Path order is optType / teamNo / race / phase, as used by the F1 app.
+  return _apiGet(`/services/user/gameplay/${_guid()}/getteam/1/${teamNo}/${matchdayId}/1`);
 }
 
 /** Get the user's rank in a specific league (leagueType: global|private|team|driver|country) */
@@ -323,6 +324,11 @@ async function getWebConfig() {
   return _apiGet('/feeds/v2/apps/web_config.json');
 }
 
+/** Session fixtures include the race's base and carried-transfer allowances. */
+async function getRaceSchedule() {
+  return _apiGetRaw('/feeds/v2/schedule/raceday_en.json');
+}
+
 /** Get the session data returned by /services/session/login */
 function getSession() {
   return sessionData;
@@ -343,4 +349,5 @@ module.exports = {
   getOpponentTeam,
   getDrivers,
   getWebConfig,
+  getRaceSchedule,
 };
