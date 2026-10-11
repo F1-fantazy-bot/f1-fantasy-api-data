@@ -148,7 +148,7 @@ test('success notification distinguishes partial current data from complete resu
         ],
       },
     ]);
-    assert.match(messages[2], /Weekly data partially available/);
+    assert.match(messages[2], /League data fetched successfully/);
     assert.match(messages[2], /Calculated race-start transfers: 1/);
     await telegram.notifySuccess([league], null, [
       {
@@ -162,6 +162,20 @@ test('success notification distinguishes partial current data from complete resu
       },
     ]);
     assert.match(messages[3], /League data fetched successfully/);
+    await telegram.notifySuccess([league], null, [
+      {
+        teams: [
+          {
+            ...current,
+            teamStateStatus: 'reconstructed-race-start',
+            budgetStatus: 'calculated-race-start',
+            transfersStatus: 'calculated-race-start',
+          },
+        ],
+      },
+    ]);
+    assert.match(messages[4], /League data fetched successfully/);
+    assert.match(messages[4], /Starting rosters\/budgets reconstructed: 1/);
   } finally {
     telegram.bot = originalBot;
   }
@@ -172,16 +186,99 @@ test('short diagnostics describe calculated transfers without claiming they are 
   diagnostics.currentMatchdayId = 18;
   for (let i = 0; i < 30; i++) {
     diagnostics.record('Current team state unavailable');
-    diagnostics.record('Calculated race-start transfers');
+    diagnostics.recordInfo('Calculated race-start transfers');
   }
   const message = diagnostics.format();
   assert(message.length < 500);
   assert.match(
     message,
-    /Transfers calculated for 30 snapshots at race start; current usage is unknown/,
+    /Race-start transfer allowances calculated for 30 team snapshots; current usage is unknown/,
   );
   assert.equal(
     message.includes('current transfers and budgets are unknown'),
     false,
   );
+});
+
+test('successful calculations alone are informational and never trigger a bugs-channel warning', async () => {
+  const diagnostics = new WeeklyDiagnostics();
+  diagnostics.recordInfo('Calculated race-start transfers');
+  assert.equal(diagnostics.issues.size, 0);
+  assert.equal(diagnostics.format(), null);
+  assert.match(
+    diagnostics.formatInfo(),
+    /ℹ️ Race-start transfer allowances calculated for 1/,
+  );
+  assert.deepEqual(await telegram.notifyWeeklyDiagnostics(diagnostics), []);
+});
+
+test('normal console output groups expected absence once and leaves response details for debug', () => {
+  const diagnostics = new WeeklyDiagnostics();
+  diagnostics.currentMatchdayId = 18;
+  for (let n = 0; n < 30; n++) {
+    diagnostics.record('Current team state unavailable', {
+      league: 'TEST',
+      team: `Team_${n}`,
+    });
+    diagnostics.recordInfo('Live opponent response unavailable', {
+      requested: 18,
+      apiSuccess: false,
+      apiRetVal: -1,
+    });
+    diagnostics.recordInfo('Calculated race-start transfers', {
+      team: `Team_${n}`,
+    });
+  }
+  const original = {
+    warn: console.warn,
+    log: console.log,
+    debug: console.debug,
+  };
+  const warnings = [];
+  const information = [];
+  const details = [];
+  console.warn = (message) => warnings.push(message);
+  console.log = (message) => information.push(message);
+  console.debug = (message) => details.push(message);
+  try {
+    diagnostics.logToConsole({ debug: false });
+    assert.equal(warnings.length, 1);
+    assert(warnings[0].length < 400);
+    assert.match(warnings[0], /30 team snapshots/);
+    assert.equal(warnings[0].includes('calculated'), false);
+    assert.equal(warnings[0].includes('apiRetVal'), false);
+    assert.equal(warnings[0].includes('Team_'), false);
+    assert.equal(information.length, 1);
+    assert.match(information[0], /^ℹ️/);
+    assert.equal(details.length, 0);
+    diagnostics.logToConsole({ debug: true });
+    assert.equal(details.length, 1);
+    assert.match(details[0], /Info — Live opponent response unavailable: 30/);
+    assert.match(details[0], /Info — Calculated race-start transfers: 30/);
+    assert.match(details[0], /apiRetVal=-1/);
+    assert.equal(details[0].includes('Warning — Calculated'), false);
+    assert.equal(
+      details[0].includes('historical transfers are not verified current'),
+      false,
+    );
+  } finally {
+    Object.assign(console, original);
+  }
+});
+
+test('unexpected responses and real request failures remain visible in the short warning', () => {
+  const diagnostics = new WeeklyDiagnostics();
+  diagnostics.record('Current team state unavailable');
+  diagnostics.record('Upcoming team response rejected', {
+    requested: 18,
+    returned: 17,
+  });
+  diagnostics.record(
+    'Upcoming team request failed',
+    {},
+    new Error('Network unavailable'),
+  );
+  const warning = diagnostics.format();
+  assert.match(warning, /Unexpected current-team responses: 1/);
+  assert.match(warning, /Upcoming team request failed: 1/);
 });

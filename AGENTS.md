@@ -68,8 +68,16 @@ The scraper modules in `src/` are:
    the field is absent) and use `getUserTeam`; other teams use
    `getOpponentTeam` with `v: teamNo`. Current and historical responses must
    match the requested race and team number and contain a seven-player roster.
-   Historical fallback is only for explicitly labeled last-known rosters;
-   current budgets are null when current state is unavailable. Transfer
+   When live opponent state is unavailable, `raceStartBaseline.js` reconstructs
+   the new planning window's starting roster and budget from fresh F1 archives
+   and previous/new price feeds. Ordinary/Wildcard rosters carry forward;
+   Final Fix restores the outgoing driver and captain; Limitless restores its
+   pre-chip original roster. Temporary chip flags are cleared. The cost cap
+   equals the previous regular cap plus the restored lineup's price changes.
+   Validate race/team identity, swap metadata, seven unique players, five
+   drivers/two constructors, prices, and nonnegative restored cash. Historical
+   fallback is used only when reconstruction fails, with null current budget.
+   Transfer
    metadata is validated independently of roster size (Final Fix archives
    can contain eight rows). `transferAllowance.js` prefers live counts and
    otherwise calculates a labeled race-start allowance from F1's freshly
@@ -106,7 +114,8 @@ totalScore, raceScores, raceBudgets, chipsUsed: [{ name, gameDayId }] }`.
      Budget and transfers live only in the `teamsData` blob.
    - `teamsData`: `{ fetchedAt, leagueName, leagueCode, leagueId,
 matchdayId, teams }` where each team has `{ teamName, userName,
-teamNo, position, budget, transfersRemaining, transfersStatus,
+teamNo, position, budget, budgetStatus, budgetSourceMatchdayId,
+transfersRemaining, transfersStatus,
 transfersSourceMatchdayId, teamStateStatus,
 teamStateMatchdayId, drivers: [...], constructors: [...] }` with each roster entry shaped
      `{ id, name, price, isCaptain, isMegaCaptain, isFinal }`.
@@ -114,8 +123,13 @@ teamStateMatchdayId, drivers: [...], constructors: [...] }` with each roster ent
      the `league` shape above.
      `matchdayId` is the canonical current/planning race. It never moves
      backward merely because opponent data is unavailable. Each team includes
-     `teamStateStatus` (`current`, `historical`, or `unavailable`) and
-     `teamStateMatchdayId` (actual roster-source race, or null). Historical
+     `teamStateStatus` (`current`, `reconstructed-race-start`, `historical`,
+     or `unavailable`) and `teamStateMatchdayId` (actual roster-source race,
+     or null). Reconstructed rosters use the previous race's archive, or an
+     earlier original roster for Limitless. The canonical top-level race is
+     the one that baseline applies to. `budgetStatus` is `live`,
+     `calculated-race-start`, or `unknown`; `budgetSourceMatchdayId` is the
+     current race, immediately previous race, or null respectively. Historical
      roster prices still use the canonical race feed, but the roster, captain,
      and chip-reversion state cannot be claimed current. Current budgets
      remain null for historical/unavailable state. Transfers have their own
@@ -124,8 +138,9 @@ teamStateMatchdayId, drivers: [...], constructors: [...] }` with each roster ent
      live/unlimited counts, previous race for calculations, or null when
      unknown. Unlimited counts are null and must not be treated as unknown.
      Consumers must honor both status fields: calculations do not reflect
-     private current-week changes, and old rosters cannot provide a current
-     budget. First-ever team weeks are explicitly unlimited when verified;
+     private current-week changes. Complete reconstructed baselines are valid
+     recommendation inputs; genuinely historical rosters cannot provide a
+     current budget. First-ever team weeks are explicitly unlimited when verified;
      previous first-week counters cannot establish normal carry-over.
      Chip usage comes from top-level `is<Name>taken` / `<name>takengd` flags on
      the opponent game-days response (see `src/chips.js`). `budget` is the
@@ -134,8 +149,9 @@ teamStateMatchdayId, drivers: [...], constructors: [...] }` with each roster ent
      `extractBudget` (see `src/budget.js`). For matchday 1 this is always
      `100` (season-start cap); later matchdays grow as the roster
      appreciates. Consumers compute cost-cap-remaining as
-     `budget − Σ_prices`. `null` when the upstream API didn't return a
-     value or current team state is unavailable (treat as unknown). The same value is
+     `budget − Σ_prices`. A reconstructed starting cap uses the previous
+     cap plus price changes from fresh feeds. `null` when both live extraction
+     and validated reconstruction are unavailable (treat as unknown). The same value is
      also mirrored into `raceBudgets["matchday_${matchdayId}"]` on the
      matching `league-standings.json` entry, so the two blobs agree on
      the start-of-week cap. Historical note: prior to the rename `budget`
@@ -207,8 +223,16 @@ teamStateMatchdayId, drivers: [...], constructors: [...] }` with each roster ent
    `weeklyDiagnostics.js`. Telegram receives a concise problem/impact summary
    (current race, unavailable team count, and unknown/stale data), sent only
    to the existing errors/bugs channel in plain text. Detailed redacted issue
-   counts, run ID, API metadata, and up to three examples per issue remain in
-   service logs via `formatDetails()`. Healthy runs produce no warning.
+   counts, run ID, API metadata, and up to three examples per diagnostic type
+   are available via `formatDetails()` when `F1_WEEKLY_DEBUG=true`.
+   `logToConsole()` prints one concise warning plus informational transfer
+   calculation counts by default. `recordInfo()` stores successful calculations
+   and the expected opponent `Meta.Success:false/RetVal:-1` response separately
+   from warnings. Reconstructed starting rosters/budgets are also information.
+   Successful baselines do not produce an incomplete-data warning. Missing
+   live state is a warning only when no valid baseline can be reconstructed;
+   unexpected responses (including owned-team failures) and request failures
+   remain visible. Informational-only runs do not send bugs-channel warnings.
    `notifySuccess` also receives the team snapshots and reports partial data
    when current state, transfers, budgets, or roster prices are incomplete.
    Previews use `notifyWeeklyDiagnostics(report, { preview: true })`; disable

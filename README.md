@@ -107,18 +107,44 @@ state rather than inferred from score history. Global and team roster prices
 always use that race's feed.
 
 Owned teams use the authenticated current-team API. Each team includes
-`teamStateStatus` (`current`, `historical`, or `unavailable`) and
-`teamStateMatchdayId` (the actual roster-source race, or `null`). When F1
-withholds current opponent state, a last-known roster can be retained with
-`historical` status and current prices, but `budget` remains `null`.
-Consumers must honor the roster status;
-a historical roster may differ after transfers or Limitless reversion.
+`teamStateStatus` (`current`, `reconstructed-race-start`, `historical`, or
+`unavailable`) and `teamStateMatchdayId` (the archived roster-source race, or
+current race for live state). When F1 withholds current opponent state, the
+service reconstructs the lineup and budget at the start of the new planning
+window, before this week's changes. These form the baseline for recommendations.
+
+`raceStartBaseline.js` carries ordinary/Wildcard rosters forward, restores
+Final Fix's outgoing driver and captain, clears temporary chip flags, and
+restores the original pre-Limitless roster from an earlier F1 archive.
+The starting cost cap is the previous race's regular cap plus the carried
+lineup's price changes. Previous/new price feeds and all archive inputs are
+queried directly; saved weekly/locked snapshots do not supply the calculation.
+Prices, five-driver/two-constructor composition, chip metadata, and nonnegative
+restored cash are validated before publishing a baseline.
+
+Reconstructed rosters use `teamStateStatus: "reconstructed-race-start"`.
+`teamStateMatchdayId` remains their archive source race (usually current - 1;
+an original pre-Limitless lineup can be older). The top-level `matchdayId`
+identifies the race the baseline applies to. Budgets carry `budgetStatus`
+(`live`, `calculated-race-start`, or `unknown`) and
+`budgetSourceMatchdayId` (current race, previous race, or `null` respectively).
+Validated starting budgets also populate `raceBudgets` for the new race.
+
+If reconstruction fails, a clearly historical roster can be retained, with
+unknown budget (`null`). Missing inputs remain warnings. A complete reconstructed
+baseline is successful recommendation data and is reported as information,
+without an incomplete-data warning. It does not assert a privately edited
+live opponent lineup.
 
 Current transfers prefer `team_info.userSubsleft` over top-level
 `usersubsleft`; these can disagree. Unknown current race or unavailable
 current price feed fails the weekly run before uploads. Partial team data is
-reported as partial, with a concise warning in the Telegram bugs channel and
-detailed diagnostics in the service logs.
+reported as partial, with one concise warning in the console and Telegram
+bugs channel. Successful transfer calculations are informational, and expected
+opponent API unavailability is not listed as an unexpected response error.
+Set `F1_WEEKLY_DEBUG=true` to include detailed, redacted API responses and up
+to three examples per diagnostic type in console output. Real request failures
+and malformed responses remain visible in the default warning.
 
 When live transfers are unavailable, the weekly service queries F1's archived
 API for the **immediately previous race** and validates its race/team identity.
@@ -159,6 +185,8 @@ transfers. Telegram summaries explicitly identify these estimates.
       "accountId": "a84f1234abcd",
       "position": 1,
       "budget": 105.8,
+      "budgetStatus": "live",
+      "budgetSourceMatchdayId": 3,
       "transfersRemaining": 3,
       "transfersStatus": "live",
       "transfersSourceMatchdayId": 3,

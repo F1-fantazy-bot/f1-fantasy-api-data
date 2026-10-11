@@ -14,6 +14,7 @@ const storage = require('./azureBlobStorageService');
 const { deriveAccountId } = require('./accountId');
 const { indexPriorRaceBudgets } = require('./priorRaceBudgets');
 const { WeeklyDiagnostics } = require('./weeklyDiagnostics');
+const { reconstructRaceStartBaseline } = require('./raceStartBaseline');
 const telegramService = require('./telegramService');
 const {
   loadTransferRules,
@@ -21,7 +22,9 @@ const {
 } = require('./transferAllowance');
 const {
   resolveWeeklyMatchday,
+  isOwnAccount,
   isValidTeamState,
+  isValidTeamMetadata,
   fetchWeeklyTeamState,
 } = require('./weeklyState');
 
@@ -98,8 +101,7 @@ async function fetchAllLeaguesData() {
       err,
     );
   }
-  const details = diagnostics.formatDetails();
-  if (details) console.warn(details);
+  diagnostics.logToConsole();
   await telegramService.notifyWeeklyDiagnostics(diagnostics);
   if (
     !prices ||
@@ -217,6 +219,8 @@ async function fetchSingleLeague(
     let raceScores = {};
     let chipsUsed = [];
     let budget = null;
+    let budgetStatus = 'unknown';
+    let budgetSourceMatchdayId = null;
     let lastCompletedMatchdayId = null;
     let teamStateStatus = 'unavailable';
     let historicalTeamData = null;
@@ -294,13 +298,25 @@ async function fetchSingleLeague(
         teamStateMatchdayId = matchdayId;
         teamStateStatus = 'current';
       } else {
-        diagnostics?.record('Upcoming team response rejected', {
+        const context = {
           ...diagnosticContext,
           requested: matchdayId,
           apiSuccess: current?.Meta?.Success,
           apiRetVal: current?.Meta?.RetVal ?? current?.retval,
           returned: current?.mdid,
-        });
+        };
+        const expectedOpponentAbsence =
+          !isOwnAccount(entry) &&
+          current?.Meta?.Success === false &&
+          (current.Meta.RetVal ?? current.retval) === -1;
+        if (expectedOpponentAbsence) {
+          diagnostics?.recordInfo(
+            'Live opponent response unavailable',
+            context,
+          );
+        } else {
+          diagnostics?.record('Upcoming team response rejected', context);
+        }
       }
     } catch (err) {
       diagnostics?.record(
@@ -312,9 +328,40 @@ async function fetchSingleLeague(
 
     if (teamData) {
       budget = extractBudget(teamData);
-      if (budget !== null) raceBudgets[`matchday_${matchdayId}`] = budget;
-      else diagnostics?.record('Team budget missing', diagnosticContext);
-    } else {
+      if (budget !== null) {
+        budgetStatus = 'live';
+        budgetSourceMatchdayId = matchdayId;
+      } else diagnostics?.record('Team budget missing', diagnosticContext);
+    } else if (matchdayId > 1) {
+      try {
+        const previous = await fetchArchivedTeam(matchdayId - 1);
+        const baseline = await reconstructRaceStartBaseline({
+          previous,
+          matchdayId,
+          teamNo,
+          chips: transferRules?.chips,
+          fetchArchivedTeam,
+          getRoster: getMatchdayRoster,
+        });
+        teamData = baseline.teamData;
+        teamStateStatus = baseline.teamStateStatus;
+        teamStateMatchdayId = baseline.teamStateMatchdayId;
+        budget = baseline.budget;
+        budgetStatus = baseline.budgetStatus;
+        budgetSourceMatchdayId = baseline.budgetSourceMatchdayId;
+        diagnostics?.recordInfo(
+          'Reconstructed race-start baselines',
+          diagnosticContext,
+        );
+      } catch (err) {
+        diagnostics?.record(
+          'Race-start reconstruction failed',
+          diagnosticContext,
+          err,
+        );
+      }
+    }
+    if (!teamData) {
       diagnostics?.record('Current team state unavailable', diagnosticContext);
       // Keep a clearly labeled last-known roster, priced for the current race.
       // Its historical transfers and budget must not become current values.
@@ -336,6 +383,8 @@ async function fetchSingleLeague(
         }
       }
     }
+    if (budget !== null) raceBudgets[`matchday_${matchdayId}`] = budget;
+    else delete raceBudgets[`matchday_${matchdayId}`];
 
     let transferState = resolveTransferAllowance(
       currentTeamData,
@@ -369,7 +418,10 @@ async function fetchSingleLeague(
       }
     }
     if (transferState.transfersStatus === 'calculated-race-start') {
-      diagnostics?.record('Calculated race-start transfers', diagnosticContext);
+      diagnostics?.recordInfo(
+        'Calculated race-start transfers',
+        diagnosticContext,
+      );
     } else if (transferState.transfersStatus === 'unknown') {
       diagnostics?.record('Remaining transfers unknown', diagnosticContext);
     }
@@ -403,7 +455,7 @@ async function fetchSingleLeague(
           mdid === teamStateMatchdayId && historicalTeamData
             ? historicalTeamData
             : await fetchArchivedTeam(mdid);
-        const val = isValidTeamState(teamData, mdid, teamNo)
+        const val = isValidTeamMetadata(teamData, mdid, teamNo)
           ? extractBudget(teamData)
           : null;
 
@@ -441,6 +493,8 @@ async function fetchSingleLeague(
       accountId,
       position,
       budget,
+      budgetStatus,
+      budgetSourceMatchdayId,
       ...transferState,
       teamStateStatus,
       teamStateMatchdayId,
@@ -451,7 +505,10 @@ async function fetchSingleLeague(
     const chipSummary = chipsUsed.length
       ? ` [chips: ${chipsUsed.map((c) => c.name).join(', ')}]`
       : '';
-    const budgetSummary = budget !== null ? ` [budget: ${budget}]` : '';
+    const budgetSummary =
+      budget !== null
+        ? ` [budget: ${budget}${budgetStatus === 'calculated-race-start' ? ' (calculated race-start)' : ''}]`
+        : '';
     const transfersSummary =
       transferState.transfersStatus === 'unlimited'
         ? ' [transfers: unlimited]'
@@ -460,7 +517,9 @@ async function fetchSingleLeague(
           : '';
     const rosterSummary =
       drivers.length || constructors.length
-        ? ` [${teamStateStatus} roster@md${teamStateMatchdayId}, prices@md${matchdayId}: ${drivers.length}D/${constructors.length}C]`
+        ? teamStateStatus === 'reconstructed-race-start'
+          ? ` [race-start roster@md${matchdayId} (source md${teamStateMatchdayId}), prices@md${matchdayId}: ${drivers.length}D/${constructors.length}C]`
+          : ` [${teamStateStatus} roster@md${teamStateMatchdayId}, prices@md${matchdayId}: ${drivers.length}D/${constructors.length}C]`
         : '';
     const raceBudgetSummary = missingMdIds.length
       ? ` [+${missingMdIds.length} raceBudget${missingMdIds.length === 1 ? '' : 's'}]`

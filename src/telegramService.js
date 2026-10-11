@@ -92,11 +92,14 @@ class TelegramService {
     const teams = teamSnapshots.flatMap((snapshot) => snapshot.teams || []);
     const incomplete = teams.filter(
       (team) =>
-        team.teamStateStatus !== 'current' ||
-        team.transfersStatus === 'calculated-race-start' ||
-        (team.transfersRemaining === null &&
+        !['current', 'reconstructed-race-start'].includes(
+          team.teamStateStatus,
+        ) ||
+        (!Number.isFinite(team.transfersRemaining) &&
           team.transfersStatus !== 'unlimited') ||
-        team.budget === null ||
+        !Number.isFinite(team.budget) ||
+        team.transfersStatus === 'unknown' ||
+        team.budgetStatus === 'unknown' ||
         team.drivers?.length !== 5 ||
         team.constructors?.length !== 2 ||
         [...team.drivers, ...team.constructors].some(
@@ -107,7 +110,7 @@ class TelegramService {
       ? '⚠️ *Weekly data partially available*'
       : '✅ *League data fetched successfully*';
     const stateLine = incomplete
-      ? `\nCurrent team state unavailable/incomplete: ${incomplete}/${teams.length} snapshots`
+      ? `\nRecommendation data unavailable/incomplete: ${incomplete}/${teams.length} snapshots`
       : '';
     const calculated = teams.filter(
       (team) => team.transfersStatus === 'calculated-race-start',
@@ -115,10 +118,16 @@ class TelegramService {
     const transfersLine = calculated
       ? `\nCalculated race-start transfers: ${calculated} snapshots (current usage unknown)`
       : '';
+    const reconstructed = teams.filter(
+      (team) => team.teamStateStatus === 'reconstructed-race-start',
+    ).length;
+    const baselineLine = reconstructed
+      ? `\nStarting rosters/budgets reconstructed: ${reconstructed} snapshots (before this week's changes)`
+      : '';
 
     const message = `${heading}
 Leagues: ${leagues.length}
-${leagueLines}${pricesLine}${stateLine}${transfersLine}
+${leagueLines}${pricesLine}${stateLine}${baselineLine}${transfersLine}
 Fetched at: ${new Date().toISOString()}`;
 
     await this.sendMessage(message, LOG_CHANNEL_ID);

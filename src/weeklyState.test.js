@@ -131,32 +131,67 @@ test('new race prices and calculated starting transfers are independent of unava
   assert.equal(other.transfersRemaining, 3);
   assert.equal(other.transfersStatus, 'calculated-race-start');
   assert.equal(other.transfersSourceMatchdayId, 17);
-  assert.equal(other.budget, null);
-  assert.equal(other.teamStateStatus, 'historical');
+  assert.equal(other.budget, 107);
+  assert.equal(other.budgetStatus, 'calculated-race-start');
+  assert.equal(other.budgetSourceMatchdayId, 17);
+  assert.equal(other.teamStateStatus, 'reconstructed-race-start');
   assert.equal(other.teamStateMatchdayId, 17);
   assert(other.drivers.every((p) => p.price === 11));
-  assert.equal(
-    result.leagues[0].league.teams[0].raceBudgets.matchday_18,
-    undefined,
-  );
+  assert.equal(result.leagues[0].league.teams[0].raceBudgets.matchday_18, 107);
   assert.equal(result.leagues[0].league.teams[0].raceBudgets.matchday_17, 100);
   assert.equal(snapshot.teams[1].transfersRemaining, 3);
   assert.equal(snapshot.teams[1].transfersStatus, 'live');
   assert.equal(snapshot.teams[1].transfersSourceMatchdayId, 18);
   assert.equal(snapshot.teams[1].budget, 110);
+  assert.equal(snapshot.teams[1].budgetStatus, 'live');
   assert.equal(snapshot.teams[1].teamStateStatus, 'current');
   assert(
     calls
       .filter((c) => c.source === 'opponent' && c.guid === opponent.user_guid)
       .every((c) => c.v === 2),
   );
-  assert(calls.filter((c) => c.source === 'prices').every((c) => c.md === 18));
-  assert.equal(calls.filter((c) => c.source === 'prices').length, 1);
+  assert.deepEqual(
+    calls
+      .filter((c) => c.source === 'prices')
+      .map((c) => c.md)
+      .sort(),
+    [17, 18],
+  );
   assert.equal(
     calls.some((c) => c.md === 19),
     false,
   );
-  assert(reports[0].format().length < 500);
+  assert.equal(reports[0].format(), null);
+  assert.equal(
+    reports[0].information.get('Reconstructed race-start baselines').count,
+    1,
+  );
+  assert.equal(reports[0].issues.has('Calculated race-start transfers'), false);
+  assert.equal(reports[0].issues.has('Upcoming team response rejected'), false);
+  assert.equal(
+    reports[0].information.get('Live opponent response unavailable').count,
+    1,
+  );
+  assert.equal(
+    reports[0].information.get('Calculated race-start transfers').count,
+    1,
+  );
+});
+
+test('owned-team absence and malformed opponent responses are not classified as expected opponent unavailability', async () => {
+  api.getUserTeam = async () => ({ Meta: { Success: false, RetVal: -1 } });
+  api.getOpponentTeam = async (guid, md, options) =>
+    state(md === 18 ? 17 : md, options.teamNo);
+  await fetchAllLeaguesData();
+  assert.equal(
+    reports[0].issues.get('Upcoming team response rejected').count,
+    2,
+  );
+  assert.equal(
+    reports[0].information.has('Live opponent response unavailable'),
+    false,
+  );
+  assert.match(reports[0].format(), /Unexpected current-team responses: 2/);
 });
 
 test('corrupt saved Singapore transfers and chip flags are ignored in favor of a fresh F1 archive', async () => {
@@ -168,6 +203,7 @@ test('corrupt saved Singapore transfers and chip flags are ignored in favor of a
         userName: 'other',
         teamNo: 2,
         transfersRemaining: 999,
+        budget: 999,
         matchdayId: 17,
         chipsUsed: [{ name: 'Wildcard', gameDayId: 17 }],
         raceBudgets: { matchday_17: 123 },
@@ -178,6 +214,7 @@ test('corrupt saved Singapore transfers and chip flags are ignored in favor of a
   const team = result.teamsData.teams[0];
   assert.equal(team.transfersRemaining, 3);
   assert.equal(team.transfersStatus, 'calculated-race-start');
+  assert.equal(team.budget, 107);
   assert.equal(
     calls.filter((c) => c.source === 'opponent' && c.md === 17).length,
     1,
@@ -205,7 +242,10 @@ test('Final Fix extra roster row does not discard valid archived transfer metada
     if (md === 18) return null;
     const data = state(md, options.teamNo, 1);
     data.userTeam[0].boosterid = 3;
-    data.userTeam[0].playerid.push({ id: 8, playerpostion: 1 });
+    data.userTeam[0].finalfxoldplayerid = 1;
+    data.userTeam[0].finalfxnewplayerid = 8;
+    data.userTeam[0].playerid[0].isfinal = 2;
+    data.userTeam[0].playerid.push({ id: 8, playerpostion: 8, isfinal: 1 });
     return data;
   };
   const result = await fetchSingleLeague('TEST');
@@ -214,7 +254,83 @@ test('Final Fix extra roster row does not discard valid archived transfer metada
     result.teamsData.teams[0].transfersStatus,
     'calculated-race-start',
   );
-  assert.equal(result.teamsData.teams[0].teamStateStatus, 'unavailable');
+  assert.equal(
+    result.teamsData.teams[0].teamStateStatus,
+    'reconstructed-race-start',
+  );
+  assert.equal(result.teamsData.teams[0].budget, 107);
+  assert.equal(result.teamsData.teams[0].drivers.length, 5);
+});
+
+test('Limitless retrieves the original roster but uses the immediately previous race for budget and transfer rules', async () => {
+  api.getLeagueLeaderboard = async () => [opponent];
+  api.getOpponentTeam = async (guid, md, options) => {
+    calls.push({ source: 'opponent', guid, md, ...options });
+    if (md === 18) return { Meta: { Success: false, RetVal: -1 } };
+    const data = state(md, options.teamNo);
+    if (md === 17) {
+      data.userTeam[0].boosterid = 1;
+      data.userTeam[0].playerid = data.userTeam[0].playerid.map((p) => ({
+        ...p,
+        id: Number(p.id) + 100,
+      }));
+    }
+    return data;
+  };
+  const result = await fetchAllLeaguesData();
+  const team = result.leagues[0].teamsData.teams[0];
+  assert.equal(team.teamStateStatus, 'reconstructed-race-start');
+  assert.equal(team.teamStateMatchdayId, 16);
+  assert.equal(team.budgetSourceMatchdayId, 17);
+  assert.equal(team.transfersSourceMatchdayId, 17);
+  assert.equal(team.budget, 107);
+  assert.equal(team.transfersRemaining, 2);
+  assert.deepEqual(
+    team.drivers.map((p) => p.id),
+    ['1', '2', '3', '4', '5'],
+  );
+  assert.equal(reports[0].format(), null);
+});
+
+test('a missing previous-price entry leaves the budget unknown instead of treating it as zero', async () => {
+  api.getLeagueLeaderboard = async () => [opponent];
+  storage.downloadDataFromAzureStorage = async () => ({
+    teams: [
+      {
+        userName: 'other',
+        teamNo: 2,
+        teamName: 'Opponent',
+        raceBudgets: { matchday_18: 999 },
+      },
+    ],
+  });
+  const getPrices = api.getDrivers;
+  api.getDrivers = async (md) => {
+    const rows = await getPrices(md);
+    if (md === 17) rows[0].Value = null;
+    return rows;
+  };
+  const result = await fetchAllLeaguesData();
+  const team = result.leagues[0].teamsData.teams[0];
+  assert.equal(team.budget, null);
+  assert.equal(team.budgetStatus, 'unknown');
+  assert.equal(
+    result.leagues[0].league.teams[0].raceBudgets.matchday_18,
+    undefined,
+  );
+  assert.equal(team.teamStateStatus, 'historical');
+  assert.match(reports[0].format(), /Race-start reconstruction failed/);
+  assert.equal(result.prices.matchdayId, 18);
+});
+
+test('null current feed prices fail before weekly uploads rather than becoming a zero price', async () => {
+  const getPrices = api.getDrivers;
+  api.getDrivers = async (md) => {
+    const rows = await getPrices(md);
+    if (md === 18) rows[0].Value = null;
+    return rows;
+  };
+  await assert.rejects(fetchAllLeaguesData(), /refusing weekly uploads/);
 });
 
 test('missing or conflicting current schedule rules disable calculation without blocking live counts', async () => {

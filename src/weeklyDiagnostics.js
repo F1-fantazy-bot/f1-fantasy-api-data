@@ -30,10 +30,19 @@ class WeeklyDiagnostics {
     this.startedAt = new Date().toISOString();
     this.currentMatchdayId = null;
     this.issues = new Map();
+    this.information = new Map();
   }
 
   record(reason, context = {}, error = null) {
-    const issue = this.issues.get(reason) || { count: 0, samples: [] };
+    this._record(this.issues, reason, context, error);
+  }
+
+  recordInfo(reason, context = {}) {
+    this._record(this.information, reason, context);
+  }
+
+  _record(collection, reason, context, error = null) {
+    const issue = collection.get(reason) || { count: 0, samples: [] };
     issue.count += 1;
     const details = Object.entries(context)
       .map(([key, value]) => `${key}=${safeText(value)}`)
@@ -42,10 +51,25 @@ class WeeklyDiagnostics {
     if (issue.samples.length < 3 && !issue.samples.includes(sample)) {
       issue.samples.push(sample);
     }
-    this.issues.set(reason, issue);
+    collection.set(reason, issue);
   }
 
-  format({ preview = false } = {}) {
+  formatInfo() {
+    const baseline = this.information.get('Reconstructed race-start baselines');
+    const calculated = this.information.get('Calculated race-start transfers');
+    const lines = [];
+    if (baseline)
+      lines.push(
+        `ℹ️ Race-start rosters and budgets reconstructed for ${baseline.count} team snapshots.`,
+      );
+    if (calculated)
+      lines.push(
+        `ℹ️ Race-start transfer allowances calculated for ${calculated.count} team snapshots; current usage is unknown.`,
+      );
+    return lines.length ? lines.join('\n') : null;
+  }
+
+  format({ preview = false, includeInfo = true } = {}) {
     const actionable = [...this.issues].filter(
       ([reason]) =>
         reason !== 'Transfer fields disagree — nested field selected',
@@ -53,7 +77,9 @@ class WeeklyDiagnostics {
     if (!actionable.length) return null;
 
     const lines = [
-      preview ? '🧪 PREVIEW — weekly data issue' : '⚠️ Weekly data issue',
+      preview
+        ? '🧪 PREVIEW — weekly data warning'
+        : '⚠️ Weekly data partially available',
     ];
     if (this.currentMatchdayId)
       lines.push(`Current race: ${this.currentMatchdayId}`);
@@ -65,9 +91,9 @@ class WeeklyDiagnostics {
     const prices = this.issues.get(
       'Price feed matchday differs from current F1 matchday',
     );
-    if (unavailable || fallback || rejected) {
+    if (unavailable || fallback) {
       lines.push(
-        `F1 did not provide current team data for ${(unavailable || fallback || rejected).count} team snapshots.`,
+        `Recommendation baselines unavailable for ${(unavailable || fallback).count} team snapshots.`,
       );
       lines.push(
         unavailable
@@ -75,11 +101,10 @@ class WeeklyDiagnostics {
           : 'Historical transfer counts may be wrong for the current race.',
       );
     }
-    const calculated = this.issues.get('Calculated race-start transfers');
-    if (calculated)
-      lines.push(
-        `Transfers calculated for ${calculated.count} snapshots at race start; current usage is unknown.`,
-      );
+    if (rejected)
+      lines.push(`Unexpected current-team responses: ${rejected.count}`);
+    const information = this.formatInfo();
+    if (includeInfo && information) lines.push(information);
     if (prices) {
       const selected = prices.samples[0]?.match(/selected=(\d+)/)?.[1];
       lines.push(
@@ -92,7 +117,6 @@ class WeeklyDiagnostics {
       'Current team state unavailable',
       'Team snapshot matchday differs from current F1 matchday',
       'Price feed matchday differs from current F1 matchday',
-      'Calculated race-start transfers',
     ]);
     const other = actionable.filter(([reason]) => !explained.has(reason));
     for (const [reason, issue] of other.slice(0, 3))
@@ -106,30 +130,42 @@ class WeeklyDiagnostics {
   }
 
   formatDetails({ preview = false } = {}) {
-    if (!this.issues.size) return null;
+    if (!this.issues.size && !this.information.size) return null;
 
     const lines = [
       preview
         ? '🧪 PREVIEW — weekly diagnostics (local run; no blobs uploaded)'
-        : '⚠️ Weekly data diagnostics',
+        : '🔎 Weekly debug diagnostics',
       `Run: ${this.runId}`,
       `Started: ${this.startedAt}`,
       `Current F1 matchday: ${this.currentMatchdayId ?? 'unknown'}`,
       'Counts are occurrences across leagues; examples are limited to 3 per issue.',
     ];
-    for (const [reason, issue] of this.issues) {
-      lines.push(
-        '',
-        `${reason}: ${issue.count}`,
-        ...issue.samples.map((s) => `• ${s}`),
-      );
+    for (const [label, collection] of [
+      ['Warning', this.issues],
+      ['Info', this.information],
+    ]) {
+      for (const [reason, issue] of collection) {
+        lines.push(
+          '',
+          `${label} — ${reason}: ${issue.count}`,
+          ...issue.samples.map((s) => `• ${s}`),
+        );
+      }
     }
-    lines.push(
-      '',
-      'Review before relying on this weekly snapshot; historical transfers are not verified current.',
-    );
 
     return lines.join('\n');
+  }
+
+  logToConsole({ debug = process.env.F1_WEEKLY_DEBUG === 'true' } = {}) {
+    const warning = this.format({ includeInfo: false });
+    if (warning) console.warn(warning);
+    const information = this.formatInfo();
+    if (information) console.log(information);
+    if (debug) {
+      const details = this.formatDetails();
+      if (details) console.debug(details);
+    }
   }
 }
 

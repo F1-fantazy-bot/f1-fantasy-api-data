@@ -239,3 +239,35 @@ limitations are unchanged. The validation harness suppressed all uploads
 and Telegram messages. Tests include deliberately corrupted saved Singapore
 data, missing previous races, invalid schedule rules, chip resets, live
 priority, and Final Fix metadata.
+
+## Follow-up: console warning classification
+
+A user-run scrape completed successfully and uploaded race-18 data, but the
+default console diagnostics repeated the same opponent-data limitation under
+multiple issue headings and listed successful transfer calculations as an issue.
+The follow-up logging change prints one short partial-data warning and a separate
+informational calculation count. Successful calculations and expected opponent
+`Meta.Success:false/RetVal:-1` responses are stored as information, with bounded
+redacted response examples available through `F1_WEEKLY_DEBUG=true`.
+Malformed responses, owned-team failures, request failures, and unknown transfer
+counts remain visible as warnings. Informational-only calculations do not trigger
+a bugs-channel warning. The underlying data retrieval and calculation behavior
+is unchanged by this logging follow-up.
+
+## Starting roster and budget baseline
+
+The user clarified that recommendations should use the lineup, budget, and
+transfer allowance at the start of the new planning window, regardless of
+later private changes. After research and explicit approval, `raceStartBaseline.js`
+now reconstructs the roster and cap directly from F1 archives and price feeds.
+Limitless restores the pre-chip roster; Final Fix restores the outgoing driver
+and its captain boost. Temporary chip flags are cleared. The previous regular
+cap plus the restored lineup's price changes gives the starting cap.
+
+The implemented helper matched 83/83 archived next-race budgets. The live local
+race-18 run produced complete reconstructed baselines for all 30 opponent league
+snapshots, alongside three live bot snapshots. It produced no partial-data
+warning, only informational source/count summaries. See
+[starting-weekend-baseline-research.md](starting-weekend-baseline-research.md)
+for the evidence and output contract. Validation suppressed uploads and Telegram
+sends; these local follow-up changes have not yet been committed or pushed.
