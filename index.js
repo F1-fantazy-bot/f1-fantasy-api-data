@@ -56,6 +56,7 @@ async function runWeekly() {
   await telegramService.notifySuccess(
     allLeagues.map(({ league }) => league),
     prices,
+    allLeagues.map(({ teamsData }) => teamsData),
   );
 }
 

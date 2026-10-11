@@ -51,20 +51,21 @@ async function getMatchdayRoster(matchdayId) {
     const kind = position === 'CONSTRUCTOR' ? 'constructor' : 'driver';
     const name = item.DisplayName || item.FUllName || item.FullName || '';
     const priceRaw = item.Value;
-    const price = typeof priceRaw === 'number' ? priceRaw : Number(priceRaw);
+    const price =
+      priceRaw === null || priceRaw === undefined || priceRaw === ''
+        ? NaN
+        : Number(priceRaw);
 
     roster.set(id, {
       name,
       price: Number.isFinite(price) ? price : null,
       kind,
-      code:
-        typeof item.DriverTLA === 'string' ? item.DriverTLA.trim() : '',
+      code: typeof item.DriverTLA === 'string' ? item.DriverTLA.trim() : '',
       teamId:
         item.TeamId === undefined || item.TeamId === null
           ? null
           : String(item.TeamId),
-      teamName:
-        typeof item.TeamName === 'string' ? item.TeamName.trim() : '',
+      teamName: typeof item.TeamName === 'string' ? item.TeamName.trim() : '',
       isActive: _normalizeBoolean(item.IsActive),
     });
   }
