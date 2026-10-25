@@ -23,7 +23,17 @@ The container has two modes, switched via the `MODE` env var:
   Fantasy auto-reverts Limitless and the locked mega-squad would be lost.
 
 Both modes share login, F1 API access, roster resolution, and Telegram
-notifications.
+notifications. The account entry URL follows F1's redirects to
+`id.formula1.com` with fresh authorization state. Consent is optional and can
+appear before or after the form; login uses the labeled email/password fields
+in `#loginForm`, with support for the legacy form. The submit button is scoped
+to that form. Authentication requires returning to the exact Fantasy origin
+and receiving a usable session GUID. Repeated initialization reuses that
+session until awaited browser cleanup.
+
+`npm test` includes offline Chromium login fixtures; install Chromium with
+`npx playwright install chromium` first. Fixtures intercept every request with
+networking disabled and never use real credentials, storage, or Telegram.
 
 Locked runs verify the capture window against a fresh F1 race schedule before
 fetching leagues and again before every upload. Writes require a verified lock,

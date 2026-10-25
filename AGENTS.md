@@ -12,7 +12,7 @@ npx playwright install chromium   # required once before first run
 npm start                         # weekly scrape — runs index.js end-to-end (needs .env)
 npm run scrape:locked             # locked-snapshot scrape (sets MODE=locked)
 npm run lint                      # eslint .
-npm test                          # node:test identity and scraper regressions
+npm test                          # node:test + offline Chromium login fixtures
 npm run lint:fix
 npm run format                    # prettier --write .
 ```
@@ -25,6 +25,13 @@ and weekly diagnostics (concise reporting and preview compatibility). Mocked
 execution and Telegram tests cover fatal/partial failures in both modes,
 redaction, bounded stacks/examples/messages, independent channel delivery, and
 cleanup ordering. Tests must never scrape, upload data, or send real messages.
+Login fixtures use real Chromium with networking disabled and every request
+intercepted. They cover absent/delayed consent before and after the form,
+identity redirects and dynamic authorization state, modern/legacy forms,
+duplicate Sign In buttons, explicit password targeting, credential rejection,
+missing forms, wrong origins, navigation failures, invalid sessions, sanitized
+errors, repeated/concurrent initialization, and fresh schedule fetch options.
+Install Chromium before running the full suite. No real credentials are used.
 Capture-window tests cover normal/sprint weekends, early race completion,
 unknown/malformed schedule data, skipped deployments, per-upload refreshes,
 repeat captures, and rejection of completed-race responses and blob paths.
@@ -73,9 +80,17 @@ The scraper modules in `src/` are:
 
 1. `f1FantasyApiService.js` — **the only module that talks to F1**. Holds module-level
    `browser` / `context` / `page` / `sessionData` singletons. `init()` launches Chromium,
-   performs a human-like login (required to bypass Distil bot detection — do not replace
-   with a plain HTTP client), then calls `/services/session/login` to obtain the GUID
-   used by every subsequent request. The authenticated team path is
+   follows the existing account entry URL through F1's dynamic redirects to
+   `id.formula1.com`. Optional consent is handled before waiting for credentials
+   and while the form loads. Uses the labeled email/password fields in
+   `#loginForm`, with legacy `Login`/password form support, explicit password
+   targeting, gradual typing, and a form-scoped Sign In button. Browser login
+   is required by Distil bot detection — do not replace it with a plain HTTP
+   client. Authentication requires an exact Fantasy origin return and a usable
+   GUID from `/services/session/login`; errors are sanitized and bounded before
+   leaving authentication. `init()` shares concurrent initialization and reuses
+   only a validated session, including locked mode's second initialization.
+   The GUID is used by every subsequent request. The authenticated team path is
    `getteam/1/{teamNo}/{race}/1` (operation type precedes team number).
    `close()` must be called in a `finally` block.
 2. `fetchLeagueData.js` — orchestration layer. Calls `getLeagues()`, filters to
@@ -469,7 +484,8 @@ unchanged. Telegram notifications still fire on commits and PRs.
 ## update your instructions
 
 The agreed reliability backlog and task order are in
-[`docs/reliability-priorities.md`](docs/reliability-priorities.md). Task 5
+[`docs/reliability-priorities.md`](docs/reliability-priorities.md). The login fix
+was brought forward; persistent logging remains deferred. Task 5
 requires discussion with Doron before deciding whether to proceed.
 
 After every change, make sure to update the instructions above to reflect the current state of the code if necessary.

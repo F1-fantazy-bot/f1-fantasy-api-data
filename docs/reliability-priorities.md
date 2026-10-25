@@ -1,8 +1,9 @@
 # API data reliability priorities
 
 Agreed with Doron on 2026-10-25. Apply this order to the weekly and locked
-data-fetch pipelines. Task 1 is implemented; executing the new version and the
-controlled delivery check remain separate. Tasks 2–5 remain planned.
+data-fetch pipelines. Task 1 is implemented; production execution and the
+controlled delivery check remain separate. The login fix (task 3) was brought
+forward ahead of persistent logging (task 2). Tasks 2, 4, and 5 remain deferred.
 
 1. **Send failure logs to Telegram — implemented.** One collector per weekly
    or locked execution records fatal login/discovery/fetch/upload/cleanup
@@ -19,11 +20,24 @@ controlled delivery check remain separate. Tasks 2–5 remain planned.
    `process.exitCode = 1`; cleanup and notification errors preserve the
    original failure. Weekly concise/debug formatting and local preview remain.
    Automated coverage mocks F1, storage, and Telegram; it sends/uploads nothing.
-2. **Persist logs and make notifications traceable.** Persist run logs and
+2. **Persist logs and make notifications traceable — deferred.** Persist run logs and
    include mode, trigger, attempt, and session time in notifications so an
    unexpected message can be traced to its originating execution.
-3. **Fix the login failure.** Investigate the F1 login timeout and fix the
-   underlying cause using the failure diagnostics.
+3. **Fix the login failure — implemented locally.** The existing account entry
+   URL follows redirects to `id.formula1.com` with dynamic authorization state.
+   Optional/delayed consent is handled before credentials; the labeled fields
+   and submit button are scoped to `#loginForm`, with legacy-form support and
+   explicit password targeting. Authentication requires the exact Fantasy origin
+   and a usable session GUID. Repeated/concurrent initialization reuses the
+   validated session; login errors are bounded and sanitized, and cleanup is
+   awaited. Offline Chromium fixtures cover both forms and failure cases.
+   Guarded local entrypoints on 2026-10-25 fetched all 3 private leagues and
+   prices in weekly mode, then 3 locked snapshot payloads during a genuine open
+   capture window. Locked mode reused one login across two init calls and made
+   four fresh schedule checks (initial plus each of three guarded uploads).
+   All uploads were intercepted, all Telegram methods were suppressed, and SDK
+   upload methods were guarded. Both entrypoints exited successfully. This is
+   local verification; publication and production execution remain separate.
 4. **Bound retries and add a deadline.** Replace unlimited restarts with
    bounded retries and a deadline. Locked snapshot attempts must stay within
    the valid capture window.
@@ -39,9 +53,12 @@ prove the failure-reporting version executed. Locked writes also require a
 verified capture window, refreshed before each upload, to preserve snapshots
 on out-of-window runs.
 
-Next: verify task 1 executes on the next authorized scheduled/manual run, then
-validate both destinations with uploads disabled in a controlled harness. Do not
-deliberately fail the existing production containers while unlimited restarts
-remain enabled. No persistent logs, new trigger/attempt/session metadata,
-login fixes, retry/deadline changes, or runner-result monitoring are included
-in task 1. Continue with task 2 in the agreed order after rollout.
+Next: review the login diff and local validation, then establish that the
+published version actually runs after the next scheduled or separately
+authorized manual start. Verify task 1 delivery to both destinations separately
+with uploads disabled in a controlled harness. Do not deliberately fail the
+existing production containers while unlimited restarts remain enabled.
+Persistent logs, new trigger/attempt/session metadata, dependency upgrades,
+saved sessions, retry/deadline changes, and runner-result monitoring remain
+outside this login phase. Do not merge, redeploy, or initiate production runs
+as part of local verification.
