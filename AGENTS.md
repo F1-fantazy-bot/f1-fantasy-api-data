@@ -25,6 +25,13 @@ and weekly diagnostics (concise reporting and preview compatibility). Mocked
 execution and Telegram tests cover fatal/partial failures in both modes,
 redaction, bounded stacks/examples/messages, independent channel delivery, and
 cleanup ordering. Tests must never scrape, upload data, or send real messages.
+Capture-window tests cover normal/sprint weekends, early race completion,
+unknown/malformed schedule data, skipped deployments, per-upload refreshes,
+repeat captures, and rejection of completed-race responses and blob paths.
+`src/releaseContainers.test.js` mocks every Azure operation and covers current
+crash-loop confirmation/rechecks, recovered running scrapes, inactive and
+ambiguous states, configuration drift, and Azure failures. It can run before
+dependency installation with `node --test src/releaseContainers.test.js`.
 
 To iterate on login/scraping with a visible browser, set `F1_HEADLESS=false` in `.env`.
 
@@ -48,6 +55,19 @@ ends F1 Fantasy auto-reverts Limitless, so a post-race fetch of the same
 matchday would silently overwrite the temporary mega-squad. The Monday
 weekly scrape captures the current planning race from live F1 state and
 must keep its current cadence.
+
+`index.js` guards locked execution with `lockedCaptureWindow.js` after login
+and before fetching leagues. F1's race schedule supplies explicit-timezone
+session timestamps and lock/completion flags. The window starts at the earliest
+qualifying/sprint-qualifying session and closes at the scheduled race end or
+earlier race completion. Missing, postponed, conflicting, or unrecognized state
+never authorizes writes. The schedule is requested with browser `cache: no-store`
+before the scrape and again before **each** locked upload. The fetched matchday
+and blob path must match that verified race; production never falls back to a
+previous completed race. Closed/unverifiable windows skip writes, notify the log
+channel in plain text, await cleanup, and exit successfully to avoid automatic
+restart loops. Unverifiable windows additionally enter the failure report.
+Repeat captures inside a verified window can still update that race's snapshot.
 
 The scraper modules in `src/` are:
 
@@ -261,13 +281,13 @@ teamStateMatchdayId, drivers: [...], constructors: [...] }` with each roster ent
    calls `getLeagueLeaderboard`, derives the same opaque `accountId` from
    each entry's `user_guid`, then for each team uses
    `getOpponentGameDays(guid, teamNo, /* v */ teamNo)` to find the
-   latest matchday in `mdDetails` and probes
-   `getOpponentTeam(guid, md, { teamNo, v: teamNo })` first for
-   `lastInDetails + 1` (between weekends) and falls back to
-   `lastInDetails` (during a weekend after the first sub-event scored
-   — typically a sprint that already completed). The first matchday
-   with a valid `team_info.teamVal` plus non-empty `playerid` array is
-   taken as the locked one. **The `v` parameter is the team_no
+   game-day/chip state, then calls
+   `getOpponentTeam(guid, md, { teamNo, v: teamNo })` only for the
+   schedule-verified capture race supplied by the production entry point.
+   Responses must match that race/team and have a valid `team_info.teamVal`
+   plus a non-empty `playerid` array. Direct helper calls without a capture race
+   retain their legacy candidate probing for compatibility; the guarded upload
+   boundary never accepts a different race. **The `v` parameter is the team_no
    disambiguator** — it's the only parameter that selects WHICH of an
    opponent's multiple F1 Fantasy teams is returned. The path-level
    `{teamNo}` is empirically ignored when querying opponents (it
@@ -282,7 +302,7 @@ teamStateMatchdayId, drivers: [...], constructors: [...] }` with each roster ent
    failures are logged and skipped. Diagnostics cover skipped teams, failed
    leagues, unavailable locked state, failed chips/rosters, incomplete roster
    metadata, missing budgets/transfers, and runs producing no snapshots.
-   Recovered candidate probes are informational. Partial results keep the
+   Legacy recovered candidate probes are informational. Partial results keep the
    existing upload/exit behavior, with a degraded notification heading rather
    than a fully successful one. Output blob shape:
    ```jsonc
@@ -409,23 +429,42 @@ Deploy commands:
   `deploy:grant-runner-msi-locked`, `deploy:scheduler-locked`.
 - `deploy:logicapps-locked` — runner + grant + scheduler only (skips ACI).
 
-Every push/merge to `main` runs `docker-build-push.yml`: build and publish the
-image with both `latest` and the commit SHA tags, then call `deploy-aci.yml`
-and `deploy-aci-locked.yml` in parallel after the build succeeds. Both reusable
-workflows receive the same immutable image digest, override `containerImage`
-from their parameter files, and verify the configured ACI image after deployment.
-An ACR push alone does not update a running/crash-looping ACI. Redeployment
-updates and restarts the one-shot workload; it can immediately execute a scrape.
-Release runs are serialized without cancelling an in-progress deployment;
-GitHub retains only the newest pending release when several merges queue up.
-Each ACI also has a deployment lock shared with manual runs. Deployment names
-include run ID and attempt so failed deployments can be rerun safely.
+Every push/merge to `main` runs `docker-build-push.yml`: validate the mocked
+release decisions, then build/publish the image with both `latest` and commit
+SHA tags. Only after publishing succeeds, independent matrix jobs run
+`scripts/stop-crash-loop.js` for weekly and locked groups (`fail-fast: false`).
+The script only stops a single-container group when provisioning is `Succeeded`,
+the group is `Running`, and the container's **current** state is `Waiting` with
+an explicit `CrashLoopBackOff` detail. It re-reads immediately before stopping
+and leaves a recovered running scrape alone. Stopped/terminated containers,
+inactive groups, updating/ambiguous/missing state, ordinary startup, and other
+errors are left unchanged. Previous exit codes/restart counts do not authorize
+stopping. The release never starts, restarts, or redeploys either group.
 
-The ACI workflows have no independent push triggers, avoiding a race between
-image publishing and deployment. Both still support `workflow_dispatch` with
-an image tag/digest input (default `latest`) for manual deployments. The two
-Logic App workflows retain their targeted infrastructure path filters and
-manual triggers. Telegram notifications fire on commits and PRs.
+Both groups remain configured with `f1fantasyacr.azurecr.io/f1-fantasy-api-data:latest`;
+read-only checks on 2026-10-25 confirmed this in Azure, so no digest migration
+was needed. Their next scheduled/manual start pulls the published image. A
+healthy scrape may finish on its existing image; a stopped crash loop waits for
+the next start. The publication summary is separate from container-state
+inspection. Neither publication nor a configured `:latest` proves the new
+version executed; check image-pull/runtime evidence and the scrape result after
+the next start. Do not label a successful publish as a successful deployment.
+
+If image configuration drifts from `:latest`, inspection reports the required
+separate migration and fails its job, without changing configuration or
+starting a scrape. A confirmed crash loop may still be stopped. Manual ACI
+redeployment with the checked-in `:latest` parameters is the migration path;
+schedule it explicitly because deployment restarts/runs the workload even if
+it was stopped. Never attempt automatic pin migration in the release workflow.
+
+Release runs are serialized without cancelling an active release; GitHub keeps
+the newest pending release if several merges queue up. Per-ACI locks are shared
+with manual deployment jobs. `deploy-aci.yml` and `deploy-aci-locked.yml` are
+manual-only workflows with fixed `:latest` images and configured-image checks.
+Deployment names include run ID and attempt so failed manual deployments can
+be rerun. The two Logic App workflows retain existing infrastructure path
+filters and manual triggers. Scheduler/runner definitions and behavior are
+unchanged. Telegram notifications still fire on commits and PRs.
 
 ## update your instructions
 

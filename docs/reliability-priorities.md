@@ -1,7 +1,7 @@
 # API data reliability priorities
 
 Agreed with Doron on 2026-10-25. Apply this order to the weekly and locked
-data-fetch pipelines. Task 1 is implemented locally; deployment and the
+data-fetch pipelines. Task 1 is implemented; executing the new version and the
 controlled delivery check remain separate. Tasks 2–5 remain planned.
 
 1. **Send failure logs to Telegram — implemented.** One collector per weekly
@@ -31,8 +31,16 @@ controlled delivery check remain separate. Tasks 2–5 remain planned.
    Doron is unsure this is needed. Discuss the need and tradeoffs with him
    when this task is reached, before deciding whether to plan or implement it.
 
-Next: review and separately authorize deployment of task 1, then validate both
-destinations using a controlled failure with data uploads disabled. Do not
+Release publishing is separate from execution: merges publish `latest` and SHA
+tags, then stop only freshly confirmed crash loops. They do not deploy or start
+fetchers. Both Azure groups were verified to use `:latest` on 2026-10-25; the
+next existing scheduled/manual start pulls the new image. Publishing does not
+prove the failure-reporting version executed. Locked writes also require a
+verified capture window, refreshed before each upload, to preserve snapshots
+on out-of-window runs.
+
+Next: verify task 1 executes on the next authorized scheduled/manual run, then
+validate both destinations with uploads disabled in a controlled harness. Do not
 deliberately fail the existing production containers while unlimited restarts
 remain enabled. No persistent logs, new trigger/attempt/session metadata,
 login fixes, retry/deadline changes, or runner-result monitoring are included

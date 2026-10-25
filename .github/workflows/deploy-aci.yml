@@ -1,19 +1,7 @@
 name: Deploy ACI
 
 on:
-  workflow_call:
-    inputs:
-      image:
-        description: Exact image produced by the successful build
-        required: true
-        type: string
   workflow_dispatch:
-    inputs:
-      image:
-        description: Image tag or digest to deploy
-        default: f1fantasyacr.azurecr.io/f1-fantasy-api-data:latest
-        required: true
-        type: string
 
 permissions:
   id-token: write
@@ -28,7 +16,7 @@ jobs:
     env:
       RESOURCE_GROUP: f1-fantazy-bot
       DEPLOYMENT_SUFFIX: ${{ github.run_id }}-${{ github.run_attempt }}
-      CONTAINER_IMAGE: ${{ inputs.image }}
+      CONTAINER_IMAGE: f1fantasyacr.azurecr.io/f1-fantasy-api-data:latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

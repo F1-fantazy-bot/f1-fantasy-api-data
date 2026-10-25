@@ -1,4 +1,4 @@
-name: Build and Deploy API Data
+name: Publish API Data Release
 
 on:
   push:
@@ -19,12 +19,18 @@ env:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
-    outputs:
-      image: ${{ env.REGISTRY_NAME }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Test release container decisions (mocked)
+        run: node --test src/releaseContainers.test.js
 
       - name: Azure login
         uses: azure/login@v2
@@ -51,16 +57,50 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  deploy-weekly:
-    needs: build-and-push
-    uses: ./.github/workflows/deploy-aci.yml
-    with:
-      image: ${{ needs.build-and-push.outputs.image }}
-    secrets: inherit
+      - name: Record image publication
+        env:
+          PUBLISHED_IMAGE: ${{ steps.build.outputs.digest }}
+        run: |
+          {
+            echo '## Image published'
+            printf 'Commit: `%s`\n\n' "$GITHUB_SHA"
+            printf 'Image: `%s/%s@%s`\n\n' "$REGISTRY_NAME" "$IMAGE_NAME" "$PUBLISHED_IMAGE"
+            echo 'Published with latest and commit SHA tags. No fetcher was started or redeployed.'
+            echo 'Publication does not confirm that the new version has executed.'
+          } >> "$GITHUB_STEP_SUMMARY"
 
-  deploy-locked:
+  inspect-containers:
     needs: build-and-push
-    uses: ./.github/workflows/deploy-aci-locked.yml
-    with:
-      image: ${{ needs.build-and-push.outputs.image }}
-    secrets: inherit
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - mode: weekly
+            container-group: f1-fantasy-api-data-aci
+          - mode: locked
+            container-group: f1-fantasy-api-data-aci-locked
+    concurrency:
+      group: api-data-aci-${{ matrix.mode }}
+      cancel-in-progress: false
+    env:
+      RESOURCE_GROUP: f1-fantazy-bot
+      CONTAINER_GROUP: ${{ matrix.container-group }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Inspect container and stop only a confirmed crash loop
+        run: node scripts/stop-crash-loop.js "$CONTAINER_GROUP"
