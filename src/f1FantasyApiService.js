@@ -203,19 +203,27 @@ function _unwrap(json) {
 }
 
 /** GET that returns raw JSON without unwrapping (for /feeds/ endpoints that don't use Data.Value) */
-async function _apiGetRaw(path) {
+async function _apiGetRaw(path, { fresh = false } = {}) {
   _ensureReady();
   const url = path.startsWith('http') ? path : `${BASE_URL}${path}`;
 
-  const result = await page.evaluate(async (fetchUrl) => {
-    const res = await fetch(fetchUrl, { credentials: 'include' });
-    const text = await res.text();
+  const result = await page.evaluate(
+    async ({ fetchUrl, fresh }) => {
+      const res = await fetch(fetchUrl, {
+        credentials: 'include',
+        cache: fresh ? 'no-store' : 'default',
+      });
+      const text = await res.text();
 
-    return { status: res.status, ok: res.ok, body: text };
-  }, url);
+      return { status: res.status, ok: res.ok, body: text };
+    },
+    { fetchUrl: url, fresh },
+  );
 
   if (!result.ok) {
-    throw new Error(`GET ${path} → HTTP ${result.status}: ${result.body.substring(0, 200)}`);
+    throw new Error(
+      `GET ${path} → HTTP ${result.status}: ${result.body.substring(0, 200)}`,
+    );
   }
 
   return JSON.parse(result.body);
@@ -325,8 +333,8 @@ async function getWebConfig() {
 }
 
 /** Session fixtures include the race's base and carried-transfer allowances. */
-async function getRaceSchedule() {
-  return _apiGetRaw('/feeds/v2/schedule/raceday_en.json');
+async function getRaceSchedule(options) {
+  return _apiGetRaw('/feeds/v2/schedule/raceday_en.json', options);
 }
 
 /** Get the session data returned by /services/session/login */

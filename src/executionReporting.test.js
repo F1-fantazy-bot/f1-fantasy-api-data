@@ -78,7 +78,30 @@ beforeEach(() => {
   api.getRaceSchedule = async () => ({
     Data: {
       fixtures: [
-        { GamedayId: 18, SubstitutionsAllowed: 2, MaxSubstitutionsCF: 1 },
+        {
+          GamedayId: 18,
+          SubstitutionsAllowed: 2,
+          MaxSubstitutionsCF: 1,
+          SessionType: 'Qualifying',
+          MDIsLocked: 1,
+          IsPostponed: 0,
+          SessionStartDateISO8601: new Date(
+            Date.now() - 86400000,
+          ).toISOString(),
+        },
+        {
+          GamedayId: 18,
+          SubstitutionsAllowed: 2,
+          MaxSubstitutionsCF: 1,
+          SessionType: 'Race',
+          MatchStatus: '1',
+          IsLive: 0,
+          MDIsCurrent: 1,
+          GDStatus: 3,
+          IsPostponed: 0,
+          SessionStartDateISO8601: new Date(Date.now() + 3600000).toISOString(),
+          SessionEndDateISO8601: new Date(Date.now() + 10800000).toISOString(),
+        },
       ],
     },
   });
@@ -294,18 +317,169 @@ test('missing storage configuration preserves dry-run upload behavior', async ()
   assert.equal(reports.length, 0);
 });
 
-test('locked: failed candidate probes recovered by fallback do not create failure reports', async () => {
+test('locked: a failed current race never falls back to a completed race', async () => {
+  const requested = [];
   api.getOpponentTeam = async (guid, md) => {
+    requested.push(md);
     if (md === 18) throw new Error('future candidate unavailable');
     return teamState(md);
   };
   const result = await execute('locked');
-  assert.equal(reports.length, 0);
-  assert(
-    result.diagnostics.information.has('Locked candidate probe recovered'),
-  );
-  assert.equal(uploads[0][0].matchdayId, 17);
+  assert.equal(result.error, null);
+  assert.deepEqual(requested, [18]);
+  assert.equal(uploads.length, 0);
+  assert.equal(reports.length, 1);
+  assert.match(reports[0], /Locked candidate request failed: 1/);
 });
+
+for (const state of [
+  'before lock',
+  'completed race',
+  'after scheduled end',
+  'unknown',
+  'request failure',
+]) {
+  test(`locked: ${state} preserves the saved Limitless snapshot and exits without retry`, async () => {
+    const saved = { roster: 'original locked Limitless mega-squad' };
+    let stored = saved;
+    const data = await api.getRaceSchedule();
+    if (state === 'before lock') {
+      data.Data.fixtures[0].SessionStartDateISO8601 = new Date(
+        Date.now() + 3600000,
+      ).toISOString();
+      data.Data.fixtures[0].MDIsLocked = 0;
+      data.Data.fixtures[1].SessionStartDateISO8601 = new Date(
+        Date.now() + 7200000,
+      ).toISOString();
+    }
+    if (state === 'completed race') data.Data.fixtures[1].MatchStatus = '4';
+    if (state === 'after scheduled end') {
+      data.Data.fixtures[1].SessionStartDateISO8601 = new Date(
+        Date.now() - 7200000,
+      ).toISOString();
+      data.Data.fixtures[1].SessionEndDateISO8601 = new Date(
+        Date.now() - 3600000,
+      ).toISOString();
+    }
+    if (state === 'unknown') delete data.Data.fixtures[1].SessionEndDateISO8601;
+    api.getRaceSchedule = async () => {
+      if (state === 'request failure') throw new Error('schedule unavailable');
+      return data;
+    };
+    let fetches = 0;
+    const result = await execute('locked', {
+      fetchLocked: async () => {
+        fetches++;
+        throw new Error('Must skip fetching');
+      },
+      upload: async (payload) => {
+        stored = payload;
+      },
+    });
+    assert.equal(stored, saved);
+    assert.equal(fetches, 0);
+    assert.equal(result.error, null);
+    assert.equal(process.exitCode, 0);
+    assert(events.includes('cleanup complete'));
+    assert.match(messages[0].text, /Locked scrape skipped/);
+    assert.equal(
+      messages.some((m) => /fetched successfully/.test(m.text)),
+      false,
+    );
+    assert.equal(
+      reports.length,
+      ['unknown', 'request failure'].includes(state) ? 1 : 0,
+    );
+  });
+}
+
+test('locked: race completion during fetching prevents all uploads', async () => {
+  const data = await api.getRaceSchedule();
+  let checks = 0;
+  api.getRaceSchedule = async (options) => {
+    assert.deepEqual(options, { fresh: true });
+    if (++checks > 1) data.Data.fixtures[1].MatchStatus = '4';
+    return data;
+  };
+  const result = await execute('locked');
+  assert.equal(checks, 2);
+  assert.equal(uploads.length, 0);
+  assert.equal(result.error, null);
+  assert.equal(process.exitCode, 0);
+  assert.match(messages[0].text, /Locked scrape skipped/);
+});
+
+test('locked: the window is refreshed before each league upload', async () => {
+  const data = await api.getRaceSchedule();
+  let checks = 0;
+  api.getRaceSchedule = async () => {
+    if (++checks === 3) data.Data.fixtures[1].IsLive = 2;
+    return data;
+  };
+  api.getLeagues = async () =>
+    ['TEST', 'SECOND'].map((code) => ({
+      league_type: 'Private',
+      league_code: code,
+      league_name: code,
+    }));
+  await execute('locked');
+  assert.equal(checks, 3);
+  assert.equal(uploads.length, 1);
+  assert.equal(uploads[0][1], 'TEST');
+  assert.equal(process.exitCode, 0);
+});
+
+test('locked: a failed window refresh preserves snapshots without causing a retry', async () => {
+  const data = await api.getRaceSchedule();
+  let checks = 0;
+  api.getRaceSchedule = async () => {
+    if (++checks > 1) throw new Error('refresh failed');
+    return data;
+  };
+  const result = await execute('locked');
+  assert.equal(uploads.length, 0);
+  assert.equal(result.error, null);
+  assert.equal(process.exitCode, 0);
+  assert.match(reports[0], /Locked capture window unverifiable/);
+  assert.match(reports[0], /refresh failed/);
+});
+
+test('locked: repeat captures inside the verified window remain allowed', async () => {
+  await execute('locked');
+  await execute('locked');
+  assert.equal(uploads.length, 2);
+  assert.equal(uploads[0][0].matchdayId, 18);
+  assert.equal(uploads[1][2], 'locked/matchday_18.json');
+  assert.equal(reports.length, 0);
+});
+
+test('locked: the requested current-race response cannot masquerade as a completed race', async () => {
+  api.getOpponentTeam = async () => teamState(17);
+  await execute('locked');
+  assert.equal(uploads.length, 0);
+  assert.match(reports[0], /Locked team state unavailable/);
+});
+
+for (const invalid of ['payload', 'blob path']) {
+  test(`locked: mismatched ${invalid} cannot overwrite another race`, async () => {
+    await execute('locked', {
+      fetchLocked: async () => [
+        {
+          league: { leagueCode: 'TEST', leagueName: 'Test' },
+          blobs: [
+            {
+              blobName: `locked/matchday_${invalid === 'blob path' ? 17 : 18}.json`,
+              payload: { matchdayId: invalid === 'payload' ? 17 : 18 },
+            },
+          ],
+        },
+      ],
+    });
+    assert.equal(uploads.length, 0);
+    assert.equal(process.exitCode, 0);
+    assert.match(reports[0], /Locked capture window unverifiable/);
+  });
+}
 
 test('locked: exhausted candidates report request stacks and unavailable state without changing success status', async () => {
   api.getOpponentTeam = async () => {
@@ -316,7 +490,7 @@ test('locked: exhausted candidates report request stacks and unavailable state w
   assert.equal(process.exitCode, 0);
   assert.equal(uploads.length, 0);
   assert.equal(reports.length, 1);
-  assert.match(reports[0], /Locked candidate request failed: 2/);
+  assert.match(reports[0], /Locked candidate request failed: 1/);
   assert.match(reports[0], /matchday=18/);
   assert.match(reports[0], /at api.getOpponentTeam/);
   assert.match(reports[0], /Locked team state unavailable/);

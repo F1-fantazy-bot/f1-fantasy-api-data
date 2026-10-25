@@ -25,6 +25,16 @@ The container has two modes, switched via the `MODE` env var:
 Both modes share login, F1 API access, roster resolution, and Telegram
 notifications.
 
+Locked runs verify the capture window against a fresh F1 race schedule before
+fetching leagues and again before every upload. Writes require a verified lock,
+an unfinished race, and a matching race/team response and snapshot path. The
+window starts at qualifying (sprint qualifying on sprint weekends) and closes
+at race completion or the scheduled race end, whichever comes first. Outside
+that window, or when its state cannot be verified, writes are skipped and the
+container exits successfully after cleanup. The log channel receives a skip
+message; unverifiable state also receives a failure report. Repeated captures
+inside a valid window remain allowed.
+
 ## Setup
 
 ```bash
@@ -237,6 +247,55 @@ Inactive entries remain in the file because an existing fantasy team may
 still own them, but consumers should only offer active entries as new picks.
 
 ## Deployment
+
+Every merge/push to `main` builds and publishes the image with both `latest`
+and commit SHA tags. **Image published does not mean new version executed.**
+Only after publishing succeeds, the release inspects the weekly and locked
+ACI groups independently. It never deploys, starts, or restarts either group.
+
+| Observed current state | Release action |
+| --- | --- |
+| Single container `Waiting` with `CrashLoopBackOff`, group `Running`, provisioning `Succeeded` | Re-read immediately; stop the group only if the crash loop is still confirmed. |
+| Healthy/running scrape, including a recovered retry | Leave it running until it finishes. |
+| Stopped or terminated container/group, or succeeded/failed group | Leave it alone. |
+| Missing, ambiguous, updating, or other waiting/error state | Leave it alone; never infer a crash loop from restart counts or previous exit codes. |
+
+Both groups must stay configured with
+`f1fantasyacr.azurecr.io/f1-fantasy-api-data:latest`. Their next existing
+scheduled/manual start pulls the published image. A healthy in-flight scrape
+can finish using its already-pulled image. A stopped crash loop waits for the
+next scheduled/manual start. Workflow summaries record publication separately
+from container inspection and do not claim the new version has executed.
+Establish actual execution separately from the next start's image-pull/runtime
+evidence and final scrape result; the configured `:latest` tag alone is not proof.
+
+Releases are serialized without cancelling an active release. If several merges
+queue up, GitHub keeps the newest pending release. Per-group locks serialize
+inspection/stop against the separate manual ACI deployment workflows. Failure
+to inspect one group does not cancel inspection of the other.
+
+### Verify configuration and migrate a pinned image
+
+Read-only Azure checks on **2026-10-25** confirmed that both existing groups
+use `:latest`; neither needs migration from a digest. These checks did not
+start, stop, or redeploy a container.
+
+If a later inspection finds a digest/SHA pin, another image, or missing image
+configuration, the release reports the required migration and fails that
+inspection job. It does **not** rewrite the image. A confirmed crash loop can
+still be stopped safely. To migrate, plan a separate manual ACI deployment
+using the checked-in `:latest` parameters during an appropriate maintenance/
+capture window. **ACI deployment restarts the one-shot workload and may run a
+scrape immediately**, including for a previously stopped group; merely stopping
+a group before deployment does not make deployment execution-free. The release
+workflow never performs this migration.
+
+ACI infrastructure deployment is available separately through the manual
+`Deploy ACI` / `Deploy ACI (locked)` workflows, both fixed to `:latest`, or the
+commands below. Existing Logic App deployment filters/manual triggers,
+scheduler schedules, runner `/start` behavior, and role grants are unchanged.
+Locked execution retains its capture-window guard, including per-upload
+refreshes and skipped writes outside a verified window.
 
 ### Deploy the ACI workload
 

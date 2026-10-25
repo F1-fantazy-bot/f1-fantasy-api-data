@@ -1,12 +1,6 @@
 name: Deploy ACI (locked)
 
 on:
-  push:
-    branches: ['main']
-    paths:
-      - 'infra/aci/azuredeploy.json'
-      - 'infra/aci/azuredeploy.locked.parameters.json'
-      - '.github/workflows/deploy-aci-locked.yml'
   workflow_dispatch:
 
 permissions:
@@ -16,9 +10,13 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    concurrency:
+      group: api-data-aci-locked
+      cancel-in-progress: false
     env:
       RESOURCE_GROUP: f1-fantazy-bot
-      DEPLOYMENT_SUFFIX: ${{ github.run_id }}
+      DEPLOYMENT_SUFFIX: ${{ github.run_id }}-${{ github.run_attempt }}
+      CONTAINER_IMAGE: f1fantasyacr.azurecr.io/f1-fantasy-api-data:latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -31,4 +29,12 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Deploy locked ACI
-        run: npm run deploy:aci-locked
+        run: npm run deploy:aci-locked -- --parameters "containerImage=$CONTAINER_IMAGE"
+
+      - name: Verify deployed image
+        run: |
+          deployed_image=$(az container show \
+            --resource-group "$RESOURCE_GROUP" \
+            --name f1-fantasy-api-data-aci-locked \
+            --query 'containers[0].image' --output tsv --only-show-errors)
+          test "$deployed_image" = "$CONTAINER_IMAGE"

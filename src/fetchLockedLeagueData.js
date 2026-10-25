@@ -2,9 +2,9 @@
  * Locked-snapshot scrape: for each private league, capture the **just-locked**
  * matchday's roster, captain, budget, transfers and chips for every team.
  *
- * The "just-locked" matchday is `lastCompletedMatchdayId + 1` — i.e. the
- * race the user has just been locked into by qualifying (or sprint
- * qualifying on sprint weekends). This mode is intended to fire shortly
+ * The production entry point supplies the matchday from a freshly verified
+ * F1 schedule capture window, after qualifying (or sprint qualifying).
+ * This mode is intended to fire shortly
  * after each session start (qualifying / race / sprint) when the F1
  * Fantasy lock has just kicked in but the race has not yet ended.
  *
@@ -29,6 +29,7 @@ const { extractChipsUsed } = require('./chips');
 const { extractBudget } = require('./budget');
 const { deriveAccountId } = require('./accountId');
 const { ExecutionDiagnostics } = require('./weeklyDiagnostics');
+const { isValidTeamMetadata } = require('./weeklyState');
 const {
   getMatchdayRoster,
   resetCache: resetRosterCache,
@@ -101,6 +102,7 @@ async function _fetchLockedTeamSnapshot(
   teamName,
   diagnostics = null,
   context = {},
+  captureMatchdayId = null,
 ) {
   const teamNo = entry.team_no || 1;
   const accountId = deriveAccountId(entry.user_guid);
@@ -162,13 +164,17 @@ async function _fetchLockedTeamSnapshot(
   // weekends, after the previous race fully scored) or lastInDetails itself
   // (during a weekend after the first sub-event already scored — typically a
   // sprint that happened earlier in the same weekend).
-  // Try +1 first; if the API returns an empty/null state for that matchday
+  // Legacy direct-helper calls try +1 first; if the API returns an empty/null state for that matchday
   // (no playerid, no teamVal) it means that matchday hasn't been locked yet,
   // and the currently-in-progress weekend is lastInDetails.
   //
   // The `v` parameter is the team_no disambiguator (see getOpponentGameDays
   // call above for the same logic).
-  const candidateMatchdays = [lastInDetails + 1, lastInDetails];
+  // Production uses ONLY the schedule-verified race, never a previous-race fallback.
+  const candidateMatchdays =
+    captureMatchdayId === null
+      ? [lastInDetails + 1, lastInDetails]
+      : [captureMatchdayId];
   let teamData = null;
   let lockedMatchdayId = null;
   const candidateErrors = [];
@@ -187,7 +193,7 @@ async function _fetchLockedTeamSnapshot(
       );
       continue;
     }
-    if (_isValidTeamState(resp)) {
+    if (_isValidTeamState(resp) && isValidTeamMetadata(resp, md, teamNo)) {
       teamData = resp;
       lockedMatchdayId = md;
       break;
@@ -288,7 +294,11 @@ function _groupByMatchday(snapshots) {
   return byMd;
 }
 
-async function fetchSingleLeagueLocked(leagueCode, diagnostics = null) {
+async function fetchSingleLeagueLocked(
+  leagueCode,
+  diagnostics = null,
+  captureMatchdayId = null,
+) {
   console.log('   Fetching league info...');
   const leagueInfo = await f1Api.getLeagueInfo(leagueCode);
   const leagueId = leagueInfo.leagueId;
@@ -305,9 +315,13 @@ async function fetchSingleLeagueLocked(leagueCode, diagnostics = null) {
   const snapshots = [];
   for (const entry of leaderboard) {
     const teamName = decodeURIComponent(entry.team_name);
-    const snap = await _fetchLockedTeamSnapshot(entry, teamName, diagnostics, {
-      league: leagueCode,
-    });
+    const snap = await _fetchLockedTeamSnapshot(
+      entry,
+      teamName,
+      diagnostics,
+      { league: leagueCode },
+      captureMatchdayId,
+    );
     if (snap) {
       snapshots.push(snap);
       const chipSummary = snap.chipsUsed.length
@@ -357,6 +371,7 @@ async function fetchSingleLeagueLocked(leagueCode, diagnostics = null) {
 
 async function fetchAllLeaguesLocked(
   diagnostics = new ExecutionDiagnostics('locked'),
+  captureMatchdayId = null,
 ) {
   diagnostics.setStage('login');
   console.log('1. Logging in to F1 Fantasy...');
@@ -385,7 +400,11 @@ async function fetchAllLeaguesLocked(
     console.log(`\n--- ${leagueName} (${leagueCode}) ---`);
 
     try {
-      const data = await fetchSingleLeagueLocked(leagueCode, diagnostics);
+      const data = await fetchSingleLeagueLocked(
+        leagueCode,
+        diagnostics,
+        captureMatchdayId,
+      );
       results.push(data);
     } catch (err) {
       diagnostics.record(

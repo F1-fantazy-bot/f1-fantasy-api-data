@@ -186,6 +186,14 @@ Fetched at: ${new Date().toISOString()}`;
     await this.sendMessage(message, LOG_CHANNEL_ID);
   }
 
+  async notifySkippedLocked(reason) {
+    await this.sendMessage(
+      `ℹ️ Locked scrape skipped\n${reason}\nNo further snapshots were uploaded.`,
+      LOG_CHANNEL_ID,
+      { parse_mode: undefined },
+    );
+  }
+
   async notifySuccessLocked(allLeagues, { degraded = false } = {}) {
     const list = Array.isArray(allLeagues) ? allLeagues : [allLeagues];
     const leagueLines = list
