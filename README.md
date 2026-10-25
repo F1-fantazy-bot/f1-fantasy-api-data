@@ -238,6 +238,21 @@ still own them, but consumers should only offer active entries as new picks.
 
 ## Deployment
 
+Every merge/push to `main` automatically builds and publishes the Docker image,
+then deploys that build's exact image digest to **both** weekly and locked ACI
+container groups. A failed build prevents both deployments. Each deployment
+verifies the configured image, so a successful release covers build and rollout.
+Deploying updates and restarts the one-shot containers and can immediately run
+both scrapes; it does not wait for the next scheduled trigger. The release does
+not check whether the scrape itself succeeds.
+
+Releases are serialized without cancelling an active deployment. If several
+merges queue up, GitHub keeps the newest pending release. Both ACI deploy
+workflows also support manual dispatch with an image tag or digest (default
+`f1fantasyacr.azurecr.io/f1-fantasy-api-data:latest`). Images are also tagged with
+the commit SHA for traceability. Logic App deployment keeps its existing
+infrastructure path filters.
+
 ### Deploy the ACI workload
 
 Deploy the one-shot container group:

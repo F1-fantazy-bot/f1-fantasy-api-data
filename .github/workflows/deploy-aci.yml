@@ -1,13 +1,19 @@
 name: Deploy ACI
 
 on:
-  push:
-    branches: ['main']
-    paths:
-      - 'infra/aci/azuredeploy.json'
-      - 'infra/aci/azuredeploy.parameters.json'
-      - '.github/workflows/deploy-aci.yml'
+  workflow_call:
+    inputs:
+      image:
+        description: Exact image produced by the successful build
+        required: true
+        type: string
   workflow_dispatch:
+    inputs:
+      image:
+        description: Image tag or digest to deploy
+        default: f1fantasyacr.azurecr.io/f1-fantasy-api-data:latest
+        required: true
+        type: string
 
 permissions:
   id-token: write
@@ -16,9 +22,13 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    concurrency:
+      group: api-data-aci-weekly
+      cancel-in-progress: false
     env:
       RESOURCE_GROUP: f1-fantazy-bot
-      DEPLOYMENT_SUFFIX: ${{ github.run_id }}
+      DEPLOYMENT_SUFFIX: ${{ github.run_id }}-${{ github.run_attempt }}
+      CONTAINER_IMAGE: ${{ inputs.image }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -31,4 +41,12 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Deploy ACI
-        run: npm run deploy:aci
+        run: npm run deploy:aci -- --parameters "containerImage=$CONTAINER_IMAGE"
+
+      - name: Verify deployed image
+        run: |
+          deployed_image=$(az container show \
+            --resource-group "$RESOURCE_GROUP" \
+            --name f1-fantasy-api-data-aci \
+            --query 'containers[0].image' --output tsv --only-show-errors)
+          test "$deployed_image" = "$CONTAINER_IMAGE"

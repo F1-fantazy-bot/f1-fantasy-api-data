@@ -409,17 +409,23 @@ Deploy commands:
   `deploy:grant-runner-msi-locked`, `deploy:scheduler-locked`.
 - `deploy:logicapps-locked` — runner + grant + scheduler only (skips ACI).
 
-GitHub Actions workflows in `.github/workflows/` build/push the image
-(`docker-build-push.yml`) and ship four deploy workflows
-(`deploy-aci.yml`, `deploy-logicapps.yml`, `deploy-aci-locked.yml`,
-`deploy-logicapps-locked.yml`). Path filters are file-targeted so each
-workflow fires only on changes that affect its own stack — a change to
-the shared `infra/aci/azuredeploy.json` triggers both ACI workflows
-(weekly + locked redeploy in parallel), but a change to
-`infra/aci/azuredeploy.locked.parameters.json` only fires the locked
-workflow. Same pattern for the runner template across the two logicapps
-workflows. All four deploy workflows also support `workflow_dispatch`
-for manual triggering. Telegram notifications fire on commits and PRs.
+Every push/merge to `main` runs `docker-build-push.yml`: build and publish the
+image with both `latest` and the commit SHA tags, then call `deploy-aci.yml`
+and `deploy-aci-locked.yml` in parallel after the build succeeds. Both reusable
+workflows receive the same immutable image digest, override `containerImage`
+from their parameter files, and verify the configured ACI image after deployment.
+An ACR push alone does not update a running/crash-looping ACI. Redeployment
+updates and restarts the one-shot workload; it can immediately execute a scrape.
+Release runs are serialized without cancelling an in-progress deployment;
+GitHub retains only the newest pending release when several merges queue up.
+Each ACI also has a deployment lock shared with manual runs. Deployment names
+include run ID and attempt so failed deployments can be rerun safely.
+
+The ACI workflows have no independent push triggers, avoiding a race between
+image publishing and deployment. Both still support `workflow_dispatch` with
+an image tag/digest input (default `latest`) for manual deployments. The two
+Logic App workflows retain their targeted infrastructure path filters and
+manual triggers. Telegram notifications fire on commits and PRs.
 
 ## update your instructions
 
