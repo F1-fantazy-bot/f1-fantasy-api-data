@@ -6,6 +6,7 @@
  * then uses page.evaluate(fetch(...)) for all subsequent API calls.
  */
 const { chromium } = require('playwright');
+const { safeText } = require('./reportSanitizer');
 
 const BASE_URL = 'https://fantasy.formula1.com';
 const LOGIN_URL =
@@ -17,16 +18,25 @@ let browser = null;
 let context = null;
 let page = null;
 let sessionData = null;
+let initialization = null;
 
 // ---------------------------------------------------------------------------
 // Browser & Login
 // ---------------------------------------------------------------------------
 
 async function init() {
-  if (page) {
-    return sessionData;
-  }
+  if (sessionData) return sessionData;
+  if (initialization) return initialization;
 
+  initialization = _initialize();
+  try {
+    return await initialization;
+  } finally {
+    initialization = null;
+  }
+}
+
+async function _initialize() {
   const email = process.env.F1_FANTASY_EMAIL;
   const password = process.env.F1_FANTASY_PASSWORD;
 
@@ -34,94 +44,160 @@ async function init() {
     throw new Error('Set F1_FANTASY_EMAIL and F1_FANTASY_PASSWORD in .env');
   }
 
-  browser = await chromium.launch({
-    headless: process.env.F1_HEADLESS !== 'false',
-    args: ['--disable-blink-features=AutomationControlled'],
-  });
+  let stage = 'browser startup';
+  try {
+    // A failed initialization is never considered a reusable authenticated page.
+    if (browser) await close();
+    browser = await chromium.launch({
+      headless: process.env.F1_HEADLESS !== 'false',
+      args: ['--disable-blink-features=AutomationControlled'],
+    });
 
-  context = await browser.newContext({
-    viewport: { width: 1280, height: 900 },
-    userAgent:
-      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-  });
+    context = await browser.newContext({
+      viewport: { width: 1280, height: 900 },
+      userAgent:
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    });
 
-  page = await context.newPage();
+    page = await context.newPage();
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => false });
+    });
 
-  await page.addInitScript(() => {
-    Object.defineProperty(navigator, 'webdriver', { get: () => false });
-  });
+    stage = 'login';
+    await _login(email, password);
+    stage = 'Fantasy session';
+    const session = await _sessionLogin();
+    // F1 GUIDs are opaque identifiers, not necessarily UUIDs. They must be
+    // usable as a single URL path segment by all authenticated API methods.
+    if (
+      typeof session?.GUID !== 'string' ||
+      !/^[a-zA-Z0-9_-]+$/.test(session.GUID) ||
+      session.GUID.length > 512 ||
+      /^(?:null|undefined)$/i.test(session.GUID)
+    ) {
+      throw new Error('No usable session GUID returned');
+    }
+    sessionData = session;
+    return sessionData;
+  } catch (error) {
+    // Playwright call logs can contain credentials, authorization URLs/state,
+    // and server error text. Do not retain the raw error as a cause or stack.
+    throw new Error(
+      `F1 authentication failed (${stage}): ${safeText(error.message || error, [email, password])}`,
+    );
+  }
+}
 
-  await _login(email, password);
-  sessionData = await _sessionLogin();
-
-  return sessionData;
+async function _dismissConsent() {
+  const buttons = [
+    page.frameLocator('iframe[title*="consent" i]').getByRole('button', {
+      name: /^accept all$/i,
+    }),
+    page.locator('#onetrust-accept-btn-handler'),
+    page.getByRole('button', { name: /^accept all$/i }),
+  ];
+  for (const button of buttons) {
+    // Optional banners may appear after the form, disappear during redirects,
+    // or not exist at all. Never spend the credential timeout waiting for one.
+    try {
+      if (await button.first().isVisible())
+        await button.first().click({ timeout: 500 });
+    } catch {
+      // The next pass can handle a banner that is still loading.
+    }
+  }
 }
 
 async function _login(email, password) {
+  // Keep the account entry URL: its redirects create fresh authorization state.
   await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
-  await page.waitForSelector('input[name="Login"]', { visible: true, timeout: 20000 });
-
-  // Dismiss cookie consent overlay
-  try {
-    const consentFrame = page.frameLocator('iframe[title*="Consent"]');
-    await consentFrame
-      .locator('button[title="Accept All"], button:has-text("Accept All"), button:has-text("ACCEPT ALL")')
-      .click({ timeout: 5000 });
-    await page.waitForTimeout(1000);
-  } catch {
-    // No banner — fine
-  }
-
-  await page.waitForTimeout(2000);
-
-  // Human-like credential entry
-  const emailInput = page.locator('input[name="Login"]');
-
-  await emailInput.hover();
-  await page.waitForTimeout(500);
-  await emailInput.click();
-  await page.waitForTimeout(300);
-
-  for (const char of email) {
-    await page.keyboard.type(char, { delay: 50 + Math.random() * 50 });
-  }
-
-  await page.waitForTimeout(800);
-  await page.keyboard.press('Tab');
-  await page.waitForTimeout(500);
-
-  for (const char of password) {
-    await page.keyboard.type(char, { delay: 50 + Math.random() * 50 });
-  }
-
-  await page.waitForTimeout(1000);
-
-  const signInBtn = page.locator('button:has-text("Sign In"):visible');
-
-  await signInBtn.hover();
-  await page.waitForTimeout(300);
-  await signInBtn.click();
+  await _dismissConsent();
+  let watchingConsent = true;
+  const consentWatcher = (async () => {
+    while (watchingConsent) {
+      try {
+        await _dismissConsent();
+        await page.waitForTimeout(200);
+      } catch {
+        // Page closure is reported by the foreground login operation.
+        break;
+      }
+    }
+  })();
 
   try {
-    await page.waitForURL(/^https:\/\/fantasy\.formula1\.com/, { timeout: 30000 });
-  } catch {
-    const errorMsg = await page
-      .locator('.loginError, [class*="error"]:visible')
+    await page
+      .locator('#loginForm:visible, form:has(input[name="Login"]):visible')
       .first()
-      .textContent()
-      .catch(() => null);
+      .waitFor({ state: 'visible', timeout: 20000 });
+    const modernForm = page.locator('#loginForm');
+    const modern = await modernForm.isVisible();
+    const form = modern
+      ? modernForm
+      : page.locator('form:has(input[name="Login"])').first();
+    const emailInput = modern
+      ? form.getByRole('textbox', { name: /email/i })
+      : form.locator('input[name="Login"]');
+    const passwordInput = modern
+      ? form.getByLabel(/^password/i)
+      : form.locator('input[type="password"]');
 
-    throw new Error(errorMsg ? `Login failed: ${errorMsg.trim()}` : `Login failed — stuck at ${page.url()}`);
+    await page.waitForTimeout(2000);
+    await _typeCredential(emailInput, email);
+    await page.waitForTimeout(800);
+    // Click the actual password field; intervening controls can change Tab order.
+    await _typeCredential(passwordInput, password);
+    await page.waitForTimeout(1000);
+
+    const signIn = form.getByRole('button', { name: /^sign in$/i });
+    await signIn.hover();
+    await page.waitForTimeout(300);
+    await signIn.click({ timeout: 10000 });
+
+    try {
+      await page.waitForURL((url) => url.origin === BASE_URL, {
+        timeout: 30000,
+      });
+    } catch {
+      const errorMsg = await form
+        .locator(
+          '.loginError:visible, [role="alert"]:visible, [class*="error"]:visible',
+        )
+        .first()
+        .textContent({ timeout: 1000 })
+        .catch(() => null);
+      throw new Error(
+        errorMsg
+          ? `Login rejected: ${errorMsg.trim()}`
+          : 'Login did not return to Fantasy',
+      );
+    }
+
+    // Let Fantasy finish its own redirects before obtaining its API session.
+    // A failed navigation must not be mistaken for a successful return.
+    await page.goto(`${BASE_URL}/en/`, {
+      waitUntil: 'domcontentloaded',
+      timeout: 30000,
+    });
+    await page.waitForTimeout(5000);
+    if (new URL(page.url()).origin !== BASE_URL) {
+      throw new Error('Login did not remain on the Fantasy origin');
+    }
+  } finally {
+    watchingConsent = false;
+    await consentWatcher;
   }
+}
 
-  // Let the Fantasy app fully load
-  try {
-    await page.goto(`${BASE_URL}/en/`, { waitUntil: 'domcontentloaded', timeout: 30000 });
-  } catch {
-    // ERR_ABORTED on redirect is fine
+async function _typeCredential(input, value) {
+  await input.hover();
+  await page.waitForTimeout(500);
+  await input.click({ timeout: 10000 });
+  await page.waitForTimeout(300);
+  for (const char of value) {
+    await page.keyboard.type(char, { delay: 50 + Math.random() * 50 });
   }
-
-  await page.waitForTimeout(5000);
 }
 
 async function _sessionLogin() {
@@ -135,8 +211,9 @@ async function _sessionLogin() {
 }
 
 async function close() {
-  if (browser) {
-    await browser.close();
+  try {
+    if (browser) await browser.close();
+  } finally {
     browser = null;
     context = null;
     page = null;
