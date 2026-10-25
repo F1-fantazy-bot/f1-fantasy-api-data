@@ -15,7 +15,6 @@ const { deriveAccountId } = require('./accountId');
 const { indexPriorRaceBudgets } = require('./priorRaceBudgets');
 const { WeeklyDiagnostics } = require('./weeklyDiagnostics');
 const { reconstructRaceStartBaseline } = require('./raceStartBaseline');
-const telegramService = require('./telegramService');
 const {
   loadTransferRules,
   resolveTransferAllowance,
@@ -28,20 +27,24 @@ const {
   fetchWeeklyTeamState,
 } = require('./weeklyState');
 
-async function fetchAllLeaguesData() {
-  const diagnostics = new WeeklyDiagnostics();
+async function fetchAllLeaguesData(diagnostics = new WeeklyDiagnostics()) {
+  diagnostics.setStage('login');
   console.log('1. Logging in to F1 Fantasy...');
-  await f1Api.init();
+  const session = await f1Api.init();
+  diagnostics.protect(session?.GUID, session?.SocialId, session?.UserId);
   console.log('   ✅ Logged in');
 
+  diagnostics.setStage('fetch', { operation: 'current race resolution' });
   const matchdayId = await resolveWeeklyMatchday();
   diagnostics.currentMatchdayId = matchdayId;
   console.log(`   Current race: ${matchdayId}`);
+  diagnostics.setStage('fetch', { operation: 'transfer rule resolution' });
   const transferRules = await loadTransferRules(matchdayId, diagnostics);
 
   resetRosterCache();
 
   console.log('2. Fetching user leagues...');
+  diagnostics.setStage('league discovery');
   const allLeagues = await f1Api.getLeagues();
   const privateLeagues = allLeagues.filter(
     (l) => l.league_type === 'Private' && l.league_code,
@@ -51,6 +54,7 @@ async function fetchAllLeaguesData() {
   );
 
   const results = [];
+  diagnostics.setStage('fetch');
 
   for (const league of privateLeagues) {
     const leagueCode = league.league_code;
@@ -101,8 +105,6 @@ async function fetchAllLeaguesData() {
       err,
     );
   }
-  diagnostics.logToConsole();
-  await telegramService.notifyWeeklyDiagnostics(diagnostics);
   if (
     !prices ||
     !prices.drivers.length ||
@@ -177,6 +179,14 @@ async function fetchSingleLeague(
 
   console.log('   Fetching leaderboard...');
   const leaderboard = await f1Api.getLeagueLeaderboard(leagueId);
+  for (const entry of leaderboard) {
+    diagnostics?.protect(
+      entry.user_guid,
+      entry.social_id,
+      entry.user_name,
+      deriveAccountId(entry.user_guid),
+    );
+  }
   console.log(`   ${leaderboard.length} teams`);
 
   let priorTeams = [];

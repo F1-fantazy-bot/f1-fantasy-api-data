@@ -1,7 +1,7 @@
 const { test, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const api = require('./f1FantasyApiService');
-const telegram = require('./telegramService');
+const { WeeklyDiagnostics } = require('./weeklyDiagnostics');
 const roster = require('./rosterService');
 const storage = require('./azureBlobStorageService');
 const { resolveWeeklyMatchday, isOwnAccount } = require('./weeklyState');
@@ -9,7 +9,6 @@ const { fetchAllLeaguesData, fetchSingleLeague } = require('./fetchLeagueData');
 const { loadTransferRules } = require('./transferAllowance');
 
 const originals = { ...api };
-const originalNotify = telegram.notifyWeeklyDiagnostics;
 const originalDownload = storage.downloadDataFromAzureStorage;
 let calls;
 let reports;
@@ -109,20 +108,22 @@ beforeEach(() => {
       PositionName: i < 5 ? 'DRIVER' : 'CONSTRUCTOR',
     }));
   };
-  telegram.notifyWeeklyDiagnostics = async (diagnostics) => {
-    reports.push(diagnostics);
-  };
   roster.resetCache();
 });
 afterEach(() => {
   Object.assign(api, originals);
-  telegram.notifyWeeklyDiagnostics = originalNotify;
   storage.downloadDataFromAzureStorage = originalDownload;
   roster.resetCache();
 });
 
+async function fetchWithDiagnostics() {
+  const diagnostics = new WeeklyDiagnostics();
+  reports.push(diagnostics);
+  return fetchAllLeaguesData(diagnostics);
+}
+
 test('new race prices and calculated starting transfers are independent of unavailable current opponents', async () => {
-  const result = await fetchAllLeaguesData();
+  const result = await fetchWithDiagnostics();
   assert.equal(result.prices.matchdayId, 18);
   assert(result.prices.drivers.every((p) => p.price === 11));
   const snapshot = result.leagues[0].teamsData;
@@ -182,7 +183,7 @@ test('owned-team absence and malformed opponent responses are not classified as 
   api.getUserTeam = async () => ({ Meta: { Success: false, RetVal: -1 } });
   api.getOpponentTeam = async (guid, md, options) =>
     state(md === 18 ? 17 : md, options.teamNo);
-  await fetchAllLeaguesData();
+  await fetchWithDiagnostics();
   assert.equal(
     reports[0].issues.get('Upcoming team response rejected').count,
     2,
@@ -277,7 +278,7 @@ test('Limitless retrieves the original roster but uses the immediately previous 
     }
     return data;
   };
-  const result = await fetchAllLeaguesData();
+  const result = await fetchWithDiagnostics();
   const team = result.leagues[0].teamsData.teams[0];
   assert.equal(team.teamStateStatus, 'reconstructed-race-start');
   assert.equal(team.teamStateMatchdayId, 16);
@@ -310,7 +311,7 @@ test('a missing previous-price entry leaves the budget unknown instead of treati
     if (md === 17) rows[0].Value = null;
     return rows;
   };
-  const result = await fetchAllLeaguesData();
+  const result = await fetchWithDiagnostics();
   const team = result.leagues[0].teamsData.teams[0];
   assert.equal(team.budget, null);
   assert.equal(team.budgetStatus, 'unknown');
@@ -330,7 +331,7 @@ test('null current feed prices fail before weekly uploads rather than becoming a
     if (md === 18) rows[0].Value = null;
     return rows;
   };
-  await assert.rejects(fetchAllLeaguesData(), /refusing weekly uploads/);
+  await assert.rejects(fetchWithDiagnostics(), /refusing weekly uploads/);
 });
 
 test('missing or conflicting current schedule rules disable calculation without blocking live counts', async () => {
@@ -432,7 +433,7 @@ test('missing current price feed fails the weekly run instead of leaving mislead
   api.getDrivers = async () => {
     throw new Error('Current feed unavailable');
   };
-  await assert.rejects(fetchAllLeaguesData(), /refusing weekly uploads/);
+  await assert.rejects(fetchWithDiagnostics(), /refusing weekly uploads/);
   assert.equal(reports.length, 1);
 });
 

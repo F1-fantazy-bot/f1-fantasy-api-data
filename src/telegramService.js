@@ -1,7 +1,32 @@
 const TelegramBot = require('node-telegram-bot-api');
+const { sanitize } = require('./reportSanitizer');
+const { ExecutionDiagnostics } = require('./weeklyDiagnostics');
 
 const LOG_CHANNEL_ID = '-1002298860617';
 const ERRORS_CHANNEL_ID = '-5167373779';
+
+// Leave room for the channel prefix and multipart heading. Count UTF-16 units,
+// which conservatively bounds Telegram's character limit even for emoji.
+function splitReport(message) {
+  const limit = 3800;
+  const chunks = [];
+  let chunk = '';
+  for (let line of message.split('\n')) {
+    if (chunk && chunk.length + line.length + 1 > limit) {
+      chunks.push(chunk);
+      chunk = '';
+    }
+    while (line.length > limit) {
+      let end = limit;
+      if (/[\uD800-\uDBFF]/.test(line[end - 1])) end--;
+      chunks.push(line.slice(0, end));
+      line = line.slice(end);
+    }
+    chunk += `${chunk ? '\n' : ''}${line}`;
+  }
+  if (chunk) chunks.push(chunk);
+  return chunks;
+}
 
 class TelegramService {
   constructor() {
@@ -19,7 +44,12 @@ class TelegramService {
     this.bot = new TelegramBot(token);
   }
 
-  async sendMessage(message, chatId = LOG_CHANNEL_ID, options = {}) {
+  async sendMessage(
+    message,
+    chatId = LOG_CHANNEL_ID,
+    options = {},
+    sensitiveValues = [],
+  ) {
     if (!this.bot) {
       console.log('[Telegram skip] Would send:', message.substring(0, 80));
 
@@ -41,7 +71,10 @@ class TelegramService {
 
       return sent;
     } catch (error) {
-      console.error('Failed to send Telegram notification:', error.message);
+      console.error(
+        'Failed to send Telegram notification:',
+        sanitize(error.message || error, sensitiveValues),
+      );
     }
   }
 
@@ -49,31 +82,51 @@ class TelegramService {
     const message = diagnostics.format({ preview });
     if (!message) return [];
 
-    // Plain text keeps team names and upstream errors from breaking Markdown.
-    // Split at line boundaries to stay below Telegram's 4096-character limit.
-    const chunks = [];
-    let chunk = '';
-    for (const line of message.split('\n')) {
-      if (chunk.length + line.length + 1 > 3400) {
-        chunks.push(chunk);
-        chunk = '';
-      }
-      chunk += `${line}\n`;
-    }
-    if (chunk) chunks.push(chunk);
+    return this._sendPlainReport(
+      message,
+      [ERRORS_CHANNEL_ID],
+      preview ? 'PREVIEW — Weekly diagnostics' : 'Weekly diagnostics',
+      diagnostics.sensitiveValues,
+    );
+  }
 
+  async notifyFailureReport(diagnostics) {
+    const message = diagnostics.formatFailureReport();
+    if (!message) return [];
+    return this._sendPlainReport(
+      message,
+      [LOG_CHANNEL_ID, ERRORS_CHANNEL_ID],
+      'Failure report',
+      diagnostics.sensitiveValues,
+    );
+  }
+
+  async _sendPlainReport(message, destinations, label, sensitiveValues = []) {
+    const chunks = splitReport(sanitize(message, sensitiveValues));
     const sent = [];
-    for (const [index, part] of chunks.entries()) {
-      const label = preview ? 'PREVIEW — ' : '';
-      const heading =
-        chunks.length > 1
-          ? `${label}Weekly diagnostics ${index + 1}/${chunks.length}\n`
-          : '';
-      sent.push(
-        await this.sendMessage(`${heading}${part}`, ERRORS_CHANNEL_ID, {
-          parse_mode: undefined,
-        }),
-      );
+    for (const destination of destinations) {
+      for (const [index, part] of chunks.entries()) {
+        const heading =
+          chunks.length > 1 ? `${label} ${index + 1}/${chunks.length}\n` : '';
+        try {
+          sent.push(
+            await this.sendMessage(
+              `${heading}${part}`,
+              destination,
+              {
+                parse_mode: undefined,
+              },
+              sensitiveValues,
+            ),
+          );
+        } catch (error) {
+          // Also isolate failures if sendMessage is replaced by another transport.
+          console.error(
+            'Failed to send failure report:',
+            sanitize(error.message || error, sensitiveValues),
+          );
+        }
+      }
     }
 
     return sent;
@@ -133,7 +186,7 @@ Fetched at: ${new Date().toISOString()}`;
     await this.sendMessage(message, LOG_CHANNEL_ID);
   }
 
-  async notifySuccessLocked(allLeagues) {
+  async notifySuccessLocked(allLeagues, { degraded = false } = {}) {
     const list = Array.isArray(allLeagues) ? allLeagues : [allLeagues];
     const leagueLines = list
       .map(({ league, blobs }) => {
@@ -148,8 +201,28 @@ Fetched at: ${new Date().toISOString()}`;
       })
       .join('\n');
     const totalBlobs = list.reduce((acc, r) => acc + (r.blobs || []).length, 0);
+    const incomplete = list.some(
+      ({ blobs }) =>
+        !blobs?.length ||
+        blobs.some(
+          ({ payload }) =>
+            !payload?.teams?.length ||
+            payload.teams.some(
+              (team) =>
+                team.drivers?.length !== 5 ||
+                team.constructors?.length !== 2 ||
+                [...team.drivers, ...team.constructors].some(
+                  (player) => !player.name || !Number.isFinite(player.price),
+                ),
+            ),
+        ),
+    );
+    const heading =
+      degraded || incomplete || totalBlobs === 0
+        ? '⚠️ *Locked-snapshot data partially available*'
+        : '🔒 *Locked-snapshot data fetched successfully*';
 
-    const message = `🔒 *Locked-snapshot data fetched successfully*
+    const message = `${heading}
 Leagues: ${list.length}
 Locked-matchday blobs: ${totalBlobs}
 ${leagueLines}
@@ -159,11 +232,9 @@ Fetched at: ${new Date().toISOString()}`;
   }
 
   async notifyError(error) {
-    const message = `❌ *Error fetching league data*
-${error.message}`;
-
-    await this.sendMessage(message, LOG_CHANNEL_ID);
-    await this.sendMessage(message, ERRORS_CHANNEL_ID);
+    const diagnostics = new ExecutionDiagnostics();
+    diagnostics.record('Fatal execution failure', {}, error);
+    return this.notifyFailureReport(diagnostics);
   }
 }
 
