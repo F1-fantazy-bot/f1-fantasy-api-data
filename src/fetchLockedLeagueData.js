@@ -28,6 +28,7 @@ const f1Api = require('./f1FantasyApiService');
 const { extractChipsUsed } = require('./chips');
 const { extractBudget } = require('./budget');
 const { deriveAccountId } = require('./accountId');
+const { ExecutionDiagnostics } = require('./weeklyDiagnostics');
 const {
   getMatchdayRoster,
   resetCache: resetRosterCache,
@@ -45,8 +46,12 @@ function _isValidTeamState(teamData) {
 }
 
 function _extractRosterItems(teamData, rosterMap) {
-  const teamEntry = Array.isArray(teamData?.userTeam) ? teamData.userTeam[0] : null;
-  const playerIds = Array.isArray(teamEntry?.playerid) ? teamEntry.playerid : [];
+  const teamEntry = Array.isArray(teamData?.userTeam)
+    ? teamData.userTeam[0]
+    : null;
+  const playerIds = Array.isArray(teamEntry?.playerid)
+    ? teamEntry.playerid
+    : [];
   const drivers = [];
   const constructors = [];
 
@@ -56,7 +61,8 @@ function _extractRosterItems(teamData, rosterMap) {
     const info = rosterMap ? rosterMap.get(id) : null;
     const position = Number(p.playerpostion);
     const kindFromFeed = info?.kind;
-    const kindFromPosition = Number.isFinite(position) && position >= 6 ? 'constructor' : 'driver';
+    const kindFromPosition =
+      Number.isFinite(position) && position >= 6 ? 'constructor' : 'driver';
     const kind = kindFromFeed || kindFromPosition;
 
     const entry = {
@@ -79,17 +85,36 @@ function _extractRosterItems(teamData, rosterMap) {
 }
 
 function _resolveTransfersRemaining(teamData) {
-  const teamEntry = Array.isArray(teamData?.userTeam) ? teamData.userTeam[0] : null;
-  const subsLeft = teamEntry?.team_info?.userSubsleft ?? teamEntry?.usersubsleft;
+  const teamEntry = Array.isArray(teamData?.userTeam)
+    ? teamData.userTeam[0]
+    : null;
+  const subsLeft =
+    teamEntry?.team_info?.userSubsleft ?? teamEntry?.usersubsleft;
 
-  return typeof subsLeft === 'number' && Number.isFinite(subsLeft) ? subsLeft : null;
+  return typeof subsLeft === 'number' && Number.isFinite(subsLeft)
+    ? subsLeft
+    : null;
 }
 
-async function _fetchLockedTeamSnapshot(entry, teamName) {
+async function _fetchLockedTeamSnapshot(
+  entry,
+  teamName,
+  diagnostics = null,
+  context = {},
+) {
   const teamNo = entry.team_no || 1;
   const accountId = deriveAccountId(entry.user_guid);
+  diagnostics?.protect(
+    entry.user_guid,
+    entry.social_id,
+    entry.user_name,
+    accountId,
+  );
+  context = { ...context, team: teamName, teamNo };
   if (!accountId) {
-    throw new Error(`Missing valid account identifier for ${teamName}; refusing to overwrite a locked snapshot with incomplete team identities`);
+    throw new Error(
+      `Missing valid account identifier for ${teamName}; refusing to overwrite a locked snapshot with incomplete team identities`,
+    );
   }
 
   let oppData;
@@ -104,7 +129,14 @@ async function _fetchLockedTeamSnapshot(entry, teamName) {
     // instead of collapsing onto whichever team v=1 yields.
     oppData = await f1Api.getOpponentGameDays(entry.user_guid, teamNo, teamNo);
   } catch (err) {
-    console.log(`   ⚠️ Could not fetch game days for ${teamName}: ${err.message}`);
+    diagnostics?.record(
+      'Locked game days fetch failed — team skipped',
+      context,
+      err,
+    );
+    console.log(
+      `   ⚠️ Could not fetch game days for ${teamName}: ${err.message}`,
+    );
 
     return null;
   }
@@ -115,6 +147,10 @@ async function _fetchLockedTeamSnapshot(entry, teamName) {
     .filter(Number.isFinite);
 
   if (completedMatchdayIds.length === 0) {
+    diagnostics?.record(
+      'No locked matchdays available — team skipped',
+      context,
+    );
     console.log(`   ⚠️ No matchdays in mdDetails for ${teamName} — skipping`);
 
     return null;
@@ -135,6 +171,7 @@ async function _fetchLockedTeamSnapshot(entry, teamName) {
   const candidateMatchdays = [lastInDetails + 1, lastInDetails];
   let teamData = null;
   let lockedMatchdayId = null;
+  const candidateErrors = [];
 
   for (const md of candidateMatchdays) {
     let resp;
@@ -144,6 +181,7 @@ async function _fetchLockedTeamSnapshot(entry, teamName) {
         v: teamNo,
       });
     } catch (err) {
+      candidateErrors.push({ md, err });
       console.log(
         `   ⚠️ getOpponentTeam(${md}, v=${teamNo}) failed for ${teamName}: ${err.message}`,
       );
@@ -157,6 +195,17 @@ async function _fetchLockedTeamSnapshot(entry, teamName) {
   }
 
   if (!teamData) {
+    for (const { md, err } of candidateErrors) {
+      diagnostics?.record(
+        'Locked candidate request failed',
+        { ...context, matchday: md },
+        err,
+      );
+    }
+    diagnostics?.record('Locked team state unavailable — team skipped', {
+      ...context,
+      matchdays: candidateMatchdays.join(', '),
+    });
     console.log(
       `   ⚠️ Locked team state invalid for ${teamName} (tried md ${candidateMatchdays.join(', ')}) — skipping`,
     );
@@ -164,11 +213,22 @@ async function _fetchLockedTeamSnapshot(entry, teamName) {
     return null;
   }
 
+  if (candidateErrors.length || lockedMatchdayId !== candidateMatchdays[0]) {
+    diagnostics?.recordInfo('Locked candidate probe recovered', {
+      ...context,
+      matchday: lockedMatchdayId,
+    });
+  }
+  context = { ...context, matchday: lockedMatchdayId };
+
   let chipsUsed = [];
   try {
     chipsUsed = extractChipsUsed(oppData);
   } catch (err) {
-    console.log(`   ⚠️ Could not extract chips for ${teamName}: ${err.message}`);
+    diagnostics?.record('Locked chip extraction failed', context, err);
+    console.log(
+      `   ⚠️ Could not extract chips for ${teamName}: ${err.message}`,
+    );
   }
 
   let drivers = [];
@@ -178,9 +238,28 @@ async function _fetchLockedTeamSnapshot(entry, teamName) {
     const composition = _extractRosterItems(teamData, rosterMap);
     drivers = composition.drivers;
     constructors = composition.constructors;
+    if (
+      drivers.length !== 5 ||
+      constructors.length !== 2 ||
+      new Set([...drivers, ...constructors].map((player) => player.id)).size !==
+        7 ||
+      [...drivers, ...constructors].some(
+        (player) => !player.name || !Number.isFinite(player.price),
+      )
+    ) {
+      diagnostics?.record('Locked roster or prices incomplete', context);
+    }
   } catch (err) {
-    console.log(`   ⚠️ Could not resolve roster for ${teamName}: ${err.message}`);
+    diagnostics?.record('Locked roster resolution failed', context, err);
+    console.log(
+      `   ⚠️ Could not resolve roster for ${teamName}: ${err.message}`,
+    );
   }
+
+  if (extractBudget(teamData) === null)
+    diagnostics?.record('Locked budget unavailable', context);
+  if (_resolveTransfersRemaining(teamData) === null)
+    diagnostics?.record('Locked transfers unavailable', context);
 
   return {
     teamName,
@@ -209,12 +288,14 @@ function _groupByMatchday(snapshots) {
   return byMd;
 }
 
-async function fetchSingleLeagueLocked(leagueCode) {
+async function fetchSingleLeagueLocked(leagueCode, diagnostics = null) {
   console.log('   Fetching league info...');
   const leagueInfo = await f1Api.getLeagueInfo(leagueCode);
   const leagueId = leagueInfo.leagueId;
   const leagueName = decodeURIComponent(leagueInfo.leagueName);
-  console.log(`   ${leagueName} (ID: ${leagueId}, ${leagueInfo.memberCount} members)`);
+  console.log(
+    `   ${leagueName} (ID: ${leagueId}, ${leagueInfo.memberCount} members)`,
+  );
 
   console.log('   Fetching leaderboard...');
   const leaderboard = await f1Api.getLeagueLeaderboard(leagueId);
@@ -224,7 +305,9 @@ async function fetchSingleLeagueLocked(leagueCode) {
   const snapshots = [];
   for (const entry of leaderboard) {
     const teamName = decodeURIComponent(entry.team_name);
-    const snap = await _fetchLockedTeamSnapshot(entry, teamName);
+    const snap = await _fetchLockedTeamSnapshot(entry, teamName, diagnostics, {
+      league: leagueCode,
+    });
     if (snap) {
       snapshots.push(snap);
       const chipSummary = snap.chipsUsed.length
@@ -241,6 +324,10 @@ async function fetchSingleLeagueLocked(leagueCode) {
   const grouped = _groupByMatchday(snapshots);
   const fetchedAt = new Date().toISOString();
   const blobs = [];
+  if (!snapshots.length)
+    diagnostics?.record('Locked league contains no snapshots', {
+      league: leagueCode,
+    });
 
   for (const [matchdayId, teams] of grouped.entries()) {
     blobs.push({
@@ -258,19 +345,29 @@ async function fetchSingleLeagueLocked(leagueCode) {
   }
 
   return {
-    league: { leagueCode, leagueName, leagueId, memberCount: leagueInfo.memberCount },
+    league: {
+      leagueCode,
+      leagueName,
+      leagueId,
+      memberCount: leagueInfo.memberCount,
+    },
     blobs,
   };
 }
 
-async function fetchAllLeaguesLocked() {
+async function fetchAllLeaguesLocked(
+  diagnostics = new ExecutionDiagnostics('locked'),
+) {
+  diagnostics.setStage('login');
   console.log('1. Logging in to F1 Fantasy...');
-  await f1Api.init();
+  const session = await f1Api.init();
+  diagnostics.protect(session?.GUID, session?.SocialId, session?.UserId);
   console.log('   ✅ Logged in');
 
   resetRosterCache();
 
   console.log('2. Fetching user leagues...');
+  diagnostics.setStage('league discovery');
   const allLeagues = await f1Api.getLeagues();
   const privateLeagues = allLeagues.filter(
     (l) => l.league_type === 'Private' && l.league_code,
@@ -280,6 +377,7 @@ async function fetchAllLeaguesLocked() {
   );
 
   const results = [];
+  diagnostics.setStage('fetch');
 
   for (const league of privateLeagues) {
     const leagueCode = league.league_code;
@@ -287,14 +385,20 @@ async function fetchAllLeaguesLocked() {
     console.log(`\n--- ${leagueName} (${leagueCode}) ---`);
 
     try {
-      const data = await fetchSingleLeagueLocked(leagueCode);
+      const data = await fetchSingleLeagueLocked(leagueCode, diagnostics);
       results.push(data);
     } catch (err) {
+      diagnostics.record(
+        'Locked league fetch failed',
+        { league: leagueCode },
+        err,
+      );
       console.log(`   ❌ Failed: ${err.message}`);
     }
   }
 
   const totalBlobs = results.reduce((acc, r) => acc + r.blobs.length, 0);
+  if (!totalBlobs) diagnostics.record('No usable locked snapshots produced');
   console.log(
     `\n✅ Done: ${results.length}/${privateLeagues.length} leagues, ${totalBlobs} locked-matchday blob(s) ready`,
   );

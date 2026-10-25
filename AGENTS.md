@@ -21,7 +21,10 @@ ESLint uses `.eslintrc.json`; `npm test` covers account ID derivation,
 safe historical-budget joins, the multi-team `v: teamNo` API discriminator,
 current race selection, available/unknown transfer counts, current-price feeds,
 chip-aware race-start transfer calculations from fresh archived API data,
-and weekly diagnostics (concise reporting, redaction, and Telegram formatting).
+and weekly diagnostics (concise reporting and preview compatibility). Mocked
+execution and Telegram tests cover fatal/partial failures in both modes,
+redaction, bounded stacks/examples/messages, independent channel delivery, and
+cleanup ordering. Tests must never scrape, upload data, or send real messages.
 
 To iterate on login/scraping with a visible browser, set `F1_HEADLESS=false` in `.env`.
 
@@ -219,12 +222,24 @@ teamStateMatchdayId, drivers: [...], constructors: [...] }` with each roster ent
    errors to **both** log and errors channels. Messages to those channels
    are auto-prefixed with `F1_FANTASY_API: `. No-ops with a warning if
    `TELEGRAM_BOT_TOKEN` is missing.
-   Weekly warnings and swallowed per-team/per-league errors are collected by
-   `weeklyDiagnostics.js`. Telegram receives a concise problem/impact summary
-   (current race, unavailable team count, and unknown/stale data), sent only
-   to the existing errors/bugs channel in plain text. Detailed redacted issue
-   counts, run ID, API metadata, and up to three examples per diagnostic type
-   are available via `formatDetails()` when `F1_WEEKLY_DEBUG=true`.
+   `weeklyDiagnostics.js` exports a shared `ExecutionDiagnostics` collector and
+   preserves `WeeklyDiagnostics` for existing weekly consumers. `index.js`
+   creates one collector per execution and delivers one consolidated failure
+   report after browser cleanup, covering fatal login, discovery, fetch,
+   upload, and cleanup errors plus partial team/league failures. Every failed
+   execution is reported; repeated categories within a run are grouped into
+   counts with at most three examples, stage/context, and sanitized stacks
+   (bounded to 8,000 characters per example). Missing data has a reason and no
+   invented stack. Reports go independently to **both** existing log
+   (`-1002298860617`) and errors (`-5167373779`) channels in plain text with
+   the `F1_FANTASY_API:` prefix. Multipart messages split on lines, including
+   oversized individual lines, and stay below 4,096 characters with headings
+   and prefixes included. Shared `reportSanitizer.js` redacts credentials,
+   tokens, connection strings, private user paths, account identifiers, and
+   URLs while retaining readable stack frames. Delivery errors are sanitized
+   locally and never trigger recursive reports or replace scrape failures.
+   Existing concise weekly formatting and `formatDetails()` debug output
+   remain available (`F1_WEEKLY_DEBUG=true`).
    `logToConsole()` prints one concise warning plus informational transfer
    calculation counts by default. `recordInfo()` stores successful calculations
    and the expected opponent `Meta.Success:false/RetVal:-1` response separately
@@ -235,8 +250,11 @@ teamStateMatchdayId, drivers: [...], constructors: [...] }` with each roster ent
    remain visible. Informational-only runs do not send bugs-channel warnings.
    `notifySuccess` also receives the team snapshots and reports partial data
    when current state, transfers, budgets, or roster prices are incomplete.
-   Previews use `notifyWeeklyDiagnostics(report, { preview: true })`; disable
-   uploads and ordinary notifications in a local harness for preview runs.
+   Fetchers collect diagnostics without sending notifications. Healthy and
+   informational-only runs send no failure report. Previews still use
+   `notifyWeeklyDiagnostics(report, { preview: true })` for a concise message
+   to the errors channel; disable uploads and ordinary notifications in a
+   local harness for preview runs. Missing tokens explicitly warn/skip locally.
 
 5. `fetchLockedLeagueData.js` — locked-snapshot orchestration. Mirrors a
    minimal subset of `fetchLeagueData.js`: for each private league it
@@ -261,7 +279,12 @@ teamStateMatchdayId, drivers: [...], constructors: [...] }` with each roster ent
    via `rosterService`, extracts chips via `chips.js`, and returns
    one snapshot per team. Snapshots are grouped by `matchdayId` so
    each league produces one blob per locked matchday. Per-team
-   failures are logged and skipped. Output blob shape:
+   failures are logged and skipped. Diagnostics cover skipped teams, failed
+   leagues, unavailable locked state, failed chips/rosters, incomplete roster
+   metadata, missing budgets/transfers, and runs producing no snapshots.
+   Recovered candidate probes are informational. Partial results keep the
+   existing upload/exit behavior, with a degraded notification heading rather
+   than a fully successful one. Output blob shape:
    ```jsonc
    {
      "fetchedAt":   "<ISO>",
@@ -308,8 +331,10 @@ the `Data.Value` envelope.
   progress lines; match that style when adding logs.
 - Per-team failures inside `fetchSingleLeague` are logged and swallowed so one bad team
   doesn't abort a whole league; keep that resilience when editing the loop.
-- Fatal errors in `index.js` must still go through `telegramService.notifyError` and end
-  with `process.exit(1)` after `f1Api.close()`.
+- Fatal errors in `index.js` set `process.exitCode = 1`; never exit before the
+  awaited `f1Api.close()` in `finally`. Cleanup errors join the consolidated
+  `telegramService.notifyFailureReport` report without hiding the original
+  scrape failure. Production failure delivery belongs only at this boundary.
 
 ## Deployment
 
@@ -354,6 +379,7 @@ files differ:
   trigger fires every hour at `:01` UTC, **Friday through Sunday only** —
   F1 race weekends are always Fri–Sun, so it's wasteful to poll Mon–Thu.
   On each pulse it:
+
   1. HTTP GETs `https://api.jolpi.ca/ergast/f1/current/next.json` (Jolpica/Ergast
      proxy of the next race in the current season).
   2. Computes the current top-of-hour as `concat(formatDateTime(startOfHour(utcNow()), 'yyyy-MM-ddTHH:mm:ss'), 'Z')`.
@@ -396,5 +422,9 @@ workflows. All four deploy workflows also support `workflow_dispatch`
 for manual triggering. Telegram notifications fire on commits and PRs.
 
 ## update your instructions
+
+The agreed reliability backlog and task order are in
+[`docs/reliability-priorities.md`](docs/reliability-priorities.md). Task 5
+requires discussion with Doron before deciding whether to proceed.
 
 After every change, make sure to update the instructions above to reflect the current state of the code if necessary.

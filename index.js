@@ -6,10 +6,12 @@ const { uploadDataToAzureStorage } = require('./src/azureBlobStorageService');
 const telegramService = require('./src/telegramService');
 const f1Api = require('./src/f1FantasyApiService');
 
-const MODE = (process.env.MODE || 'weekly').toLowerCase();
+const { ExecutionDiagnostics } = require('./src/weeklyDiagnostics');
+const { sanitize } = require('./src/reportSanitizer');
 
-async function runWeekly() {
-  const { leagues: allLeagues, prices } = await fetchAllLeaguesData();
+async function runWeekly(diagnostics, services, env) {
+  const { leagues: allLeagues, prices } =
+    await services.fetchWeekly(diagnostics);
 
   if (!allLeagues || allLeagues.length === 0) {
     throw new Error('No league data fetched');
@@ -30,20 +32,26 @@ async function runWeekly() {
     console.log('Prices snapshot: (unavailable — see warnings above)');
   }
 
-  if (process.env.AZURE_STORAGE_CONNECTION_STRING) {
+  diagnostics.setStage('upload');
+  if (env.AZURE_STORAGE_CONNECTION_STRING) {
     for (const { league, teamsData } of allLeagues) {
-      await uploadDataToAzureStorage(league, league.leagueCode);
-      await uploadDataToAzureStorage(
-        teamsData,
-        league.leagueCode,
-        'teams-data.json',
-      );
+      diagnostics.setStage('upload', {
+        league: league.leagueCode,
+        blob: 'league-standings.json',
+      });
+      await services.upload(league, league.leagueCode);
+      diagnostics.setStage('upload', {
+        league: league.leagueCode,
+        blob: 'teams-data.json',
+      });
+      await services.upload(teamsData, league.leagueCode, 'teams-data.json');
     }
 
     if (prices) {
       // Container-root upload (no `leagues/<code>/` prefix) — driver and
       // constructor prices are league-agnostic.
-      await uploadDataToAzureStorage(prices, null, 'prices.json');
+      diagnostics.setStage('upload', { blob: 'prices.json' });
+      await services.upload(prices, null, 'prices.json');
     } else {
       console.log('⚠️  Skipping prices.json upload — no prices snapshot');
     }
@@ -53,21 +61,28 @@ async function runWeekly() {
     );
   }
 
-  await telegramService.notifySuccess(
+  diagnostics.setStage('notification');
+  await services.telegram.notifySuccess(
     allLeagues.map(({ league }) => league),
     prices,
     allLeagues.map(({ teamsData }) => teamsData),
   );
 }
 
-async function runLocked() {
-  const allLeagues = await fetchAllLeaguesLocked();
+async function runLocked(diagnostics, services, env) {
+  const allLeagues = await services.fetchLocked(diagnostics);
 
   if (!allLeagues || allLeagues.length === 0) {
     throw new Error('No locked league data fetched');
   }
 
   const totalBlobs = allLeagues.reduce((acc, r) => acc + r.blobs.length, 0);
+  if (
+    totalBlobs === 0 &&
+    !diagnostics.issues.has('No usable locked snapshots produced')
+  ) {
+    diagnostics.record('No usable locked snapshots produced');
+  }
   console.log(
     `\nFetched ${allLeagues.length} leagues, ${totalBlobs} locked-matchday blob(s):`,
   );
@@ -79,10 +94,16 @@ async function runLocked() {
     ),
   );
 
-  if (process.env.AZURE_STORAGE_CONNECTION_STRING) {
+  diagnostics.setStage('upload');
+  if (env.AZURE_STORAGE_CONNECTION_STRING) {
     for (const { league, blobs } of allLeagues) {
       for (const { blobName, payload } of blobs) {
-        await uploadDataToAzureStorage(payload, league.leagueCode, blobName);
+        diagnostics.setStage('upload', {
+          league: league.leagueCode,
+          blob: blobName,
+          matchday: payload.matchdayId,
+        });
+        await services.upload(payload, league.leagueCode, blobName);
       }
     }
   } else {
@@ -91,35 +112,83 @@ async function runLocked() {
     );
   }
 
-  await telegramService.notifySuccessLocked(allLeagues);
+  diagnostics.setStage('notification');
+  await services.telegram.notifySuccessLocked(allLeagues, {
+    degraded: diagnostics.hasFailures(),
+  });
 }
 
-(async () => {
+// Delivery happens once, after cleanup, so partial and fatal failures share a report.
+// Dependencies are injectable for offline execution tests; CLI defaults are unchanged.
+async function runExecution({
+  mode = (process.env.MODE || 'weekly').toLowerCase(),
+  env = process.env,
+  services = {},
+} = {}) {
+  services = {
+    fetchWeekly: fetchAllLeaguesData,
+    fetchLocked: fetchAllLeaguesLocked,
+    upload: uploadDataToAzureStorage,
+    telegram: telegramService,
+    api: f1Api,
+    ...services,
+  };
+  const diagnostics = new ExecutionDiagnostics(mode);
+  let failure = null;
   try {
-    console.log(`MODE=${MODE}`);
-
-    if (MODE === 'locked') {
-      await runLocked();
-    } else if (MODE === 'weekly') {
-      await runWeekly();
+    console.log(`MODE=${mode}`);
+    if (mode === 'locked') {
+      await runLocked(diagnostics, services, env);
+    } else if (mode === 'weekly') {
+      await runWeekly(diagnostics, services, env);
     } else {
-      throw new Error(`Unknown MODE "${MODE}". Expected "weekly" or "locked".`);
+      diagnostics.setStage('mode selection');
+      throw new Error(`Unknown MODE "${mode}". Expected "weekly" or "locked".`);
     }
   } catch (error) {
-    const errorMessage = error.stack || error.message;
-    console.error('Error:', errorMessage);
-
+    failure = error;
+    diagnostics.record('Fatal execution failure', {}, error);
+    console.error(
+      'Error:',
+      sanitize(
+        error.stack || error.message || error,
+        diagnostics.sensitiveValues,
+      ),
+    );
+    process.exitCode = 1;
+  } finally {
+    diagnostics.setStage('cleanup');
     try {
-      await telegramService.notifyError(error);
-    } catch (telegramError) {
+      await services.api.close();
+    } catch (error) {
+      diagnostics.record('Browser cleanup failed', {}, error);
       console.error(
-        'Failed to send error notification:',
-        telegramError.message,
+        'Browser cleanup failed:',
+        sanitize(
+          error.stack || error.message || error,
+          diagnostics.sensitiveValues,
+        ),
+      );
+      failure ||= error;
+      process.exitCode = 1;
+    }
+    diagnostics.logToConsole();
+    try {
+      if (diagnostics.hasFailures())
+        await services.telegram.notifyFailureReport(diagnostics);
+    } catch (error) {
+      // Notification transport must never replace the scrape/cleanup outcome.
+      console.error(
+        'Failed to send failure report:',
+        sanitize(error.message || error, diagnostics.sensitiveValues),
       );
     }
-
-    process.exit(1);
-  } finally {
-    await f1Api.close();
   }
-})();
+  return { diagnostics, error: failure };
+}
+
+if (require.main === module) {
+  runExecution();
+}
+
+module.exports = { runExecution };

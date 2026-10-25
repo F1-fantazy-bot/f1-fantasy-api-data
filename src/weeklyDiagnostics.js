@@ -1,36 +1,35 @@
 const { randomUUID } = require('node:crypto');
+const { sanitize, safeText, safeStack } = require('./reportSanitizer');
 
-function safeText(value) {
-  let text = String(value ?? 'unknown');
-
-  for (const key of [
-    'F1_FANTASY_EMAIL',
-    'F1_FANTASY_PASSWORD',
-    'TELEGRAM_BOT_TOKEN',
-    'AZURE_STORAGE_CONNECTION_STRING',
-  ]) {
-    const secret = process.env[key];
-    if (secret) text = text.split(secret).join('[redacted]');
-  }
-
-  return text
-    .replace(/\/services\/user\/[^\s]+/g, '/services/user/[redacted]')
-    .replace(
-      /[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}(?:-\d+-\d+)?/gi,
-      '[redacted]',
-    )
-    .replace(/https?:\/\/[^\s]+/g, '[URL redacted]')
-    .replace(/[\r\n]+/g, ' ')
-    .slice(0, 240);
-}
-
-class WeeklyDiagnostics {
-  constructor() {
+class ExecutionDiagnostics {
+  constructor(mode = 'weekly') {
+    this.mode = mode;
+    this.stage = 'fetch';
+    this.context = {};
+    this.sensitiveValues = new Set();
     this.runId = randomUUID();
     this.startedAt = new Date().toISOString();
     this.currentMatchdayId = null;
     this.issues = new Map();
     this.information = new Map();
+  }
+
+  setStage(stage, context = {}) {
+    this.stage = stage;
+    this.context = context;
+  }
+
+  protect(...values) {
+    for (const value of values) {
+      if (value !== undefined && value !== null && String(value).length)
+        this.sensitiveValues.add(String(value));
+    }
+  }
+
+  hasFailures() {
+    return [...this.issues.keys()].some(
+      (reason) => reason !== 'Transfer fields disagree — nested field selected',
+    );
   }
 
   record(reason, context = {}, error = null) {
@@ -42,14 +41,30 @@ class WeeklyDiagnostics {
   }
 
   _record(collection, reason, context, error = null) {
-    const issue = collection.get(reason) || { count: 0, samples: [] };
+    reason = safeText(reason, this.sensitiveValues);
+    const issue = collection.get(reason) || {
+      count: 0,
+      samples: [],
+      examples: [],
+    };
     issue.count += 1;
-    const details = Object.entries(context)
-      .map(([key, value]) => `${key}=${safeText(value)}`)
+    const details = Object.entries({
+      stage: this.stage,
+      ...this.context,
+      ...context,
+    })
+      .map(
+        ([key, value]) =>
+          `${safeText(key)}=${/account|guid|social|userName/i.test(key) ? '[redacted]' : safeText(value, this.sensitiveValues)}`,
+      )
       .join(', ');
-    const sample = `${details}${error ? `; error=${safeText(error.message)}` : ''}`;
+    const sample = `${details}${error ? `; error=${safeText(error.message ?? error, this.sensitiveValues)}` : ''}`;
     if (issue.samples.length < 3 && !issue.samples.includes(sample)) {
       issue.samples.push(sample);
+      issue.examples.push({
+        summary: sample,
+        stack: safeStack(error, this.sensitiveValues),
+      });
     }
     collection.set(reason, issue);
   }
@@ -70,6 +85,10 @@ class WeeklyDiagnostics {
   }
 
   format({ preview = false, includeInfo = true } = {}) {
+    if (this.mode !== 'weekly') {
+      if (!this.hasFailures()) return null;
+      return `${preview ? '🧪 PREVIEW — ' : '⚠️ '}Locked data partially available\n${[...this.issues].map(([reason, issue]) => `${reason}: ${issue.count}`).join('\n')}`;
+    }
     const actionable = [...this.issues].filter(
       ([reason]) =>
         reason !== 'Transfer fields disagree — nested field selected',
@@ -134,8 +153,8 @@ class WeeklyDiagnostics {
 
     const lines = [
       preview
-        ? '🧪 PREVIEW — weekly diagnostics (local run; no blobs uploaded)'
-        : '🔎 Weekly debug diagnostics',
+        ? `🧪 PREVIEW — ${this.mode} diagnostics (local run; no blobs uploaded)`
+        : `🔎 ${this.mode === 'weekly' ? 'Weekly' : 'Locked'} debug diagnostics`,
       `Run: ${this.runId}`,
       `Started: ${this.startedAt}`,
       `Current F1 matchday: ${this.currentMatchdayId ?? 'unknown'}`,
@@ -157,6 +176,33 @@ class WeeklyDiagnostics {
     return lines.join('\n');
   }
 
+  formatFailureReport() {
+    if (!this.hasFailures()) return null;
+    const fatal =
+      this.issues.has('Fatal execution failure') ||
+      this.issues.has('Browser cleanup failed');
+    const lines = [
+      `${fatal ? '❌' : '⚠️'} ${this.mode} execution ${fatal ? 'failed' : 'completed with partial failures'}`,
+      fatal
+        ? this.currentMatchdayId
+          ? `Current race: ${this.currentMatchdayId}`
+          : null
+        : this.format({ includeInfo: false }),
+      'Counts are occurrences; at most 3 examples per failure category.',
+    ];
+    for (const [reason, issue] of this.issues) {
+      if (reason === 'Transfer fields disagree — nested field selected')
+        continue;
+      lines.push('', `${reason}: ${issue.count}`);
+      for (const example of issue.examples) {
+        lines.push(`• ${example.summary}`);
+        if (example.stack) lines.push(example.stack);
+      }
+    }
+    // Apply again to catch identifiers learned later in this execution.
+    return sanitize(lines.filter(Boolean).join('\n'), this.sensitiveValues);
+  }
+
   logToConsole({ debug = process.env.F1_WEEKLY_DEBUG === 'true' } = {}) {
     const warning = this.format({ includeInfo: false });
     if (warning) console.warn(warning);
@@ -169,4 +215,6 @@ class WeeklyDiagnostics {
   }
 }
 
-module.exports = { WeeklyDiagnostics };
+class WeeklyDiagnostics extends ExecutionDiagnostics {}
+
+module.exports = { WeeklyDiagnostics, ExecutionDiagnostics };
