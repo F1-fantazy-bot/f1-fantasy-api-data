@@ -1,3 +1,5 @@
+const { CHIPS } = require('./chips');
+const completeChipFlags = Object.fromEntries(CHIPS.map((chip) => [chip.takenFlag, 0]));
 const { test, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const api = require('./f1FantasyApiService');
@@ -87,6 +89,7 @@ beforeEach(() => {
   });
   api.getLeagueLeaderboard = async () => [opponent, own];
   api.getOpponentGameDays = async () => ({
+    ...completeChipFlags,
     mdDetails: { 17: { pts: 20 }, 18: { pts: 5 }, 19: { pts: null } },
   });
   api.getOpponentTeam = async (guid, md, options) => {
@@ -224,7 +227,7 @@ test('corrupt saved Singapore transfers and chip flags are ignored in favor of a
 
 test('only the immediately previous race can supply transfer carry-over, even with a gap in score history', async () => {
   api.getLeagueLeaderboard = async () => [opponent];
-  api.getOpponentGameDays = async () => ({ mdDetails: { 16: { pts: 20 } } });
+  api.getOpponentGameDays = async () => ({ ...completeChipFlags, mdDetails: { 16: { pts: 20 } } });
   api.getOpponentTeam = async (guid, md, options) => {
     calls.push({ source: 'opponent', md });
     return md === 16 ? state(md, options.teamNo, 2) : null;
@@ -379,7 +382,7 @@ test('owned and opponent multi-team responses preserve team selection and zero t
 
 test('current roster is fetched before the first scored race and with no score history', async () => {
   api.getLeagueLeaderboard = async () => [own];
-  api.getOpponentGameDays = async () => ({ mdDetails: {} });
+  api.getOpponentGameDays = async () => ({ ...completeChipFlags, mdDetails: {} });
   api.getWebConfig = async () => ({ Data: { constraints: { GamedayId: 1 } } });
   const result = await fetchSingleLeague('TEST');
   assert.equal(result.teamsData.matchdayId, 1);
@@ -419,7 +422,7 @@ test('canonical race uses config race number, falls back to account state, and n
 test('season end keeps the canonical final race instead of probing a nonexistent next race', async () => {
   api.getWebConfig = async () => ({ Data: { constraints: { GamedayId: 22 } } });
   api.getLeagueLeaderboard = async () => [own];
-  api.getOpponentGameDays = async () => ({ mdDetails: { 22: { pts: 10 } } });
+  api.getOpponentGameDays = async () => ({ ...completeChipFlags, mdDetails: { 22: { pts: 10 } } });
   const result = await fetchSingleLeague('TEST');
   assert.equal(result.teamsData.matchdayId, 22);
   assert(calls.some((c) => c.source === 'own' && c.md === 22));

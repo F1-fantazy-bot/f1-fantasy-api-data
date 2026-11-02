@@ -373,7 +373,12 @@ async function getFeaturedLeagues() {
  * opponent's first team and is correct for users with only one team.
  */
 async function getOpponentGameDays(opponentGuid, teamNo = 1, v = 1) {
-  return _apiGet(`/services/user/opponentteam/opponentgamedayget/${teamNo}/${opponentGuid}/${v}`);
+  const json = await _apiGetRaw(`/services/user/opponentteam/opponentgamedayget/${teamNo}/${opponentGuid}/${v}`);
+  if ([false, 0, 'false', '0'].includes(json?.Meta?.Success)) {
+    throw new Error('Opponent game-days response reported failure');
+  }
+
+  return _unwrap(json);
 }
 
 /**

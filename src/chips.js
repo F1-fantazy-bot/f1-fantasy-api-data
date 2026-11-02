@@ -70,5 +70,22 @@ function extractChipsUsed(oppData) {
 
 module.exports = {
   extractChipsUsed,
+  extractChipUsage,
   CHIPS,
 };
+
+// A complete set of flags proves zero usage; an empty/malformed response does not.
+function validTakenFlag(value) {
+  if (typeof value === 'boolean') return true;
+  if (typeof value !== 'number' && typeof value !== 'string') return false;
+  if (typeof value === 'string' && !value.trim()) return false;
+  const number = Number(value);
+  return Number.isFinite(number) && Number.isInteger(number) && number >= 0;
+}
+
+function extractChipUsage(data) {
+  const chipsUsed = extractChipsUsed(data);
+  const complete = data && typeof data === 'object' && !Array.isArray(data) &&
+    CHIPS.every((chip) => validTakenFlag(data[chip.takenFlag]));
+  return { chipsUsed, chipUsageStatus: complete ? 'known' : 'unknown' };
+}
