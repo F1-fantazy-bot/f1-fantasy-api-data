@@ -3,7 +3,7 @@
  * Returns an array of `{ league, teamsData }` tuples, one per league.
  */
 const f1Api = require('./f1FantasyApiService');
-const { extractChipsUsed } = require('./chips');
+const { extractChipUsage } = require('./chips');
 const { extractBudget } = require('./budget');
 const {
   getMatchdayRoster,
@@ -228,6 +228,7 @@ async function fetchSingleLeague(
     }
     let raceScores = {};
     let chipsUsed = [];
+    let chipUsageStatus = 'unknown';
     let budget = null;
     let budgetStatus = 'unknown';
     let budgetSourceMatchdayId = null;
@@ -274,7 +275,10 @@ async function fetchSingleLeague(
         lastCompletedMatchdayId = Math.max(...completedMatchdayIds);
 
       try {
-        chipsUsed = extractChipsUsed(oppData);
+        ({ chipsUsed, chipUsageStatus } = extractChipUsage(oppData));
+        if (chipUsageStatus === 'unknown') {
+          diagnostics?.record('Chip usage flags incomplete', diagnosticContext);
+        }
       } catch (err) {
         diagnostics?.record('Chip extraction failed', diagnosticContext, err);
         console.log(
@@ -494,6 +498,7 @@ async function fetchSingleLeague(
       raceScores,
       raceBudgets,
       chipsUsed,
+      chipUsageStatus,
     });
 
     teamsComposition.push({

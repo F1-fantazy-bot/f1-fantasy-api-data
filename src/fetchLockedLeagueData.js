@@ -25,7 +25,7 @@
  * discriminator and per-team `chipsUsed`.
  */
 const f1Api = require('./f1FantasyApiService');
-const { extractChipsUsed } = require('./chips');
+const { extractChipUsage } = require('./chips');
 const { extractBudget } = require('./budget');
 const { deriveAccountId } = require('./accountId');
 const { ExecutionDiagnostics } = require('./weeklyDiagnostics');
@@ -132,7 +132,7 @@ async function _fetchLockedTeamSnapshot(
     oppData = await f1Api.getOpponentGameDays(entry.user_guid, teamNo, teamNo);
   } catch (err) {
     diagnostics?.record(
-      'Locked game days fetch failed — team skipped',
+      captureMatchdayId === null ? 'Locked game days fetch failed — team skipped' : 'Locked game days fetch failed — chip usage unknown',
       context,
       err,
     );
@@ -140,7 +140,7 @@ async function _fetchLockedTeamSnapshot(
       `   ⚠️ Could not fetch game days for ${teamName}: ${err.message}`,
     );
 
-    return null;
+    if (captureMatchdayId === null) return null;
   }
 
   const mdDetails = oppData?.mdDetails || {};
@@ -148,7 +148,7 @@ async function _fetchLockedTeamSnapshot(
     .map(Number)
     .filter(Number.isFinite);
 
-  if (completedMatchdayIds.length === 0) {
+  if (completedMatchdayIds.length === 0 && captureMatchdayId === null) {
     diagnostics?.record(
       'No locked matchdays available — team skipped',
       context,
@@ -228,8 +228,12 @@ async function _fetchLockedTeamSnapshot(
   context = { ...context, matchday: lockedMatchdayId };
 
   let chipsUsed = [];
+  let chipUsageStatus = 'unknown';
   try {
-    chipsUsed = extractChipsUsed(oppData);
+    ({ chipsUsed, chipUsageStatus } = extractChipUsage(oppData));
+    if (chipUsageStatus === 'unknown') {
+      diagnostics?.record('Locked chip usage flags incomplete', context);
+    }
   } catch (err) {
     diagnostics?.record('Locked chip extraction failed', context, err);
     console.log(
@@ -279,6 +283,7 @@ async function _fetchLockedTeamSnapshot(
     drivers,
     constructors,
     chipsUsed,
+    chipUsageStatus,
   };
 }
 

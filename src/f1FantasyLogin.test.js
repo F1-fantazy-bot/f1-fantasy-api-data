@@ -200,6 +200,9 @@ async function fixture(t, options = {}) {
             ),
           });
         }
+        if (url.pathname.startsWith('/services/user/opponentteam/opponentgamedayget/')) {
+          return route.fulfill({ json: options.gameDays });
+        }
         if (url.pathname === '/feeds/v2/schedule/raceday_en.json') {
           return route.fulfill({ json: { Data: { fixtures: [] } } });
         }
@@ -357,4 +360,24 @@ test('session HTTP failure is sanitized before leaving authentication', async (t
       assert(!error.stack.includes(secret));
     return true;
   });
+});
+
+
+for (const success of [false, 0, 'false', '0']) {
+  test(`game-days API rejects unsuccessful envelopes even with complete zero flags: ${success}`, async (t) => {
+    const { CHIPS } = require('./chips');
+    const flags = Object.fromEntries(CHIPS.map((chip) => [chip.takenFlag, 0]));
+    const { api } = await fixture(t, { gameDays: { Meta: { Success: success }, Data: { Value: flags } } });
+    await api.init();
+    await assert.rejects(api.getOpponentGameDays('private-opponent', 2, 2), /reported failure/);
+  });
+}
+
+test('game-days API unwraps successful complete flags without losing team discriminator', async (t) => {
+  const { CHIPS, extractChipUsage } = require('./chips');
+  const flags = Object.fromEntries(CHIPS.map((chip) => [chip.takenFlag, 0]));
+  const { api, fetches } = await fixture(t, { gameDays: { Meta: { Success: true }, Data: { Value: flags } } });
+  await api.init();
+  assert.equal(extractChipUsage(await api.getOpponentGameDays('private-opponent', 2, 2)).chipUsageStatus, 'known');
+  assert((await fetches()).some((fetch) => fetch.url.endsWith('/opponentgamedayget/2/private-opponent/2')));
 });

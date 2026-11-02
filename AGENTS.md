@@ -130,7 +130,7 @@ The scraper modules in `src/` are:
    incomplete current prices abort the run before uploads.
    - `league`: `{ fetchedAt, leagueName, leagueCode, leagueId, memberCount,
 teams }`, where each team has `{ teamName, userName, teamNo, accountId, position,
-totalScore, raceScores, raceBudgets, chipsUsed: [{ name, gameDayId }] }`.
+totalScore, raceScores, raceBudgets, chipUsageStatus, chipsUsed: [{ name, gameDayId }] }`.
      `teamNo` mirrors the API's `team_no` field (1/2/3). `accountId` is
      a stable 12-hex-character SHA-256-derived identifier based on the
      leaderboard entry's trimmed, case-normalized opaque `user_guid`, which
@@ -489,3 +489,28 @@ was brought forward; persistent logging remains deferred. Task 5
 requires discussion with Doron before deciding whether to proceed.
 
 After every change, make sure to update the instructions above to reflect the current state of the code if necessary.
+
+
+### Verified season chip usage
+
+Weekly standings and locked team rows now carry `chipUsageStatus: known | unknown`
+alongside unchanged `chipsUsed`. `extractChipUsage` requires all six valid taken
+flags; booleans and nonnegative integer numeric/string flags are accepted,
+including positive Extra DRS game-day flags. Missing/malformed flags and request
+or extraction failures stay unknown and emit existing diagnostics. A used chip
+remains used without a game-day timestamp. Game-days API envelopes explicitly
+reporting failure are rejected before unwrapping. During a schedule-verified
+locked capture, missing game-day history/usage does not prevent reading the
+verified race's roster; its usage is marked unknown when flags are unavailable.
+Legacy direct-helper calls still require history to discover candidate races.
+The capture-window guard and per-upload freshness checks remain mandatory.
+
+Ship this scraper contract first and let a normal scheduled (or separately
+explicitly authorized) scrape populate it. Existing blobs must not be backfilled
+as known; the bot displays them as Usage unavailable. Never automatically start a
+production scraper to populate markers. `node scripts/validate-chip-usage.js`
+provides a read-only local completeness probe: upload credentials and Telegram
+notification settings are cleared, only API/extraction modules are imported,
+and no weekly/locked execution or writes run. Local validation on 2026-11-02
+checked 22 distinct teams: 22 known, zero unknown, zero failures. All notifications
+were disabled and no uploads were attempted.

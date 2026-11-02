@@ -1,3 +1,5 @@
+const { CHIPS } = require('./chips');
+const completeChipFlags = Object.fromEntries(CHIPS.map((chip) => [chip.takenFlag, 0]));
 const { test, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const api = require('./f1FantasyApiService');
@@ -114,7 +116,7 @@ beforeEach(() => {
     memberCount: 1,
   });
   api.getLeagueLeaderboard = async () => [entry];
-  api.getOpponentGameDays = async () => ({ mdDetails: { 17: { pts: 20 } } });
+  api.getOpponentGameDays = async () => ({ ...completeChipFlags, mdDetails: { 17: { pts: 20 } } });
   api.getOpponentTeam = async (guid, md) => teamState(md);
   api.getDrivers = async () =>
     Array.from({ length: 7 }, (_, i) => ({
@@ -247,7 +249,7 @@ for (const mode of ['weekly', 'locked']) {
     const category =
       mode === 'weekly'
         ? 'Race scores fetch failed'
-        : 'Locked game days fetch failed — team skipped';
+        : 'Locked game days fetch failed — chip usage unknown';
     const issue = result.diagnostics.issues.get(category);
     assert.equal(issue.count, 6);
     assert.equal(issue.examples.length, 3);
@@ -498,17 +500,34 @@ test('locked: exhausted candidates report request stacks and unavailable state w
   assert.match(messages[0].text, /partially available/);
 });
 
-test('locked: missing data has descriptive reasons without invented stacks', async () => {
-  api.getOpponentGameDays = async () => ({ mdDetails: {} });
+test('locked: missing score history does not prevent a verified capture with known chip usage', async () => {
+  api.getOpponentGameDays = async () => ({ ...completeChipFlags, mdDetails: {} });
   const result = await execute('locked');
-  assert.equal(reports.length, 1);
-  assert.match(reports[0], /No locked matchdays available — team skipped/);
-  assert.equal(
-    result.diagnostics.issues.values().next().value.examples[0].stack,
-    null,
-  );
-  assert.match(reports[0], /No usable locked snapshots produced/);
+  assert.equal(result.error, null);
+  assert.equal(reports.length, 0);
+  assert.equal(uploads.length, 1);
+  assert.equal(uploads[0][0].teams[0].chipUsageStatus, 'known');
 });
+
+test('locked: game-days fetch failure retains the verified roster with unknown chip usage', async () => {
+  api.getOpponentGameDays = async () => { throw new Error('game days unavailable'); };
+  await execute('locked');
+  assert.equal(uploads.length, 1);
+  assert.equal(uploads[0][0].teams[0].chipUsageStatus, 'unknown');
+  assert.deepEqual(uploads[0][0].teams[0].chipsUsed, []);
+  assert.match(reports[0], /chip usage unknown/);
+});
+
+for (const mode of ['weekly', 'locked']) {
+  test(`${mode}: incomplete flags preserve recorded usage and report unknown`, async () => {
+    api.getOpponentGameDays = async () => ({ mdDetails: { 17: { pts: 20 } }, isWildcardtaken: 1 });
+    await execute(mode);
+    const team = uploads.find((upload) => upload[0].teams)?.[0].teams[0];
+    assert.equal(team.chipUsageStatus, 'unknown');
+    assert.deepEqual(team.chipsUsed, [{ name: 'Wildcard', gameDayId: null }]);
+    assert.match(reports[0], /chip usage flags incomplete/i);
+  });
+}
 
 test('locked: empty discovery remains fatal and explicitly reports no snapshots', async () => {
   api.getLeagues = async () => [];
@@ -521,6 +540,7 @@ for (const kind of ['chip', 'roster', 'incomplete roster']) {
   test(`locked: ${kind} resolution is reported and uploads keep existing behavior`, async () => {
     if (kind === 'chip')
       api.getOpponentGameDays = async () => ({
+        ...completeChipFlags,
         mdDetails: { 17: { pts: 20 } },
         get isWildcardtaken() {
           throw new Error('invalid chip payload');
