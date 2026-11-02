@@ -508,9 +508,6 @@ The capture-window guard and per-upload freshness checks remain mandatory.
 Ship this scraper contract first and let a normal scheduled (or separately
 explicitly authorized) scrape populate it. Existing blobs must not be backfilled
 as known; the bot displays them as Usage unavailable. Never automatically start a
-production scraper to populate markers. `node scripts/validate-chip-usage.js`
-provides a read-only local completeness probe: upload credentials and Telegram
-notification settings are cleared, only API/extraction modules are imported,
-and no weekly/locked execution or writes run. Local validation on 2026-11-02
+production scraper to populate markers. Read-only local validation on 2026-11-02
 checked 22 distinct teams: 22 known, zero unknown, zero failures. All notifications
 were disabled and no uploads were attempted.
