@@ -11,9 +11,6 @@
     "runnerLogicAppName": {
       "value": "f1-fantasy-api-data-runner-locked"
     },
-    "raceScheduleEndpoint": {
-      "value": "https://api.jolpi.ca/ergast/f1/current/next.json"
-    },
     "telegramBotToken": {
       "reference": {
         "keyVault": {
@@ -21,6 +18,9 @@
         },
         "secretName": "telegram-bot-token"
       }
+    },
+    "calendarStorageAccountName": {
+      "value": "f1fantazybot9eca"
     }
   }
 }

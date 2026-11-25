@@ -415,11 +415,11 @@ files differ:
   F1 race weekends are always Fri–Sun, so it's wasteful to poll Mon–Thu.
   On each pulse it:
 
-  1. HTTP GETs `https://api.jolpi.ca/ergast/f1/current/next.json` (Jolpica/Ergast
-     proxy of the next race in the current season).
-  2. Computes the current top-of-hour as `concat(formatDateTime(startOfHour(utcNow()), 'yyyy-MM-ddTHH:mm:ss'), 'Z')`.
+  1. Reads `jolpica/calendar.json` from Azure Blob Storage using the scheduler’s
+     managed identity and validates the current season.
+  2. Computes the current top-of-hour as `formatDateTime(utcNow(), 'yyyy-MM-ddTHH:00:00Z')`.
   3. Builds candidate session-start strings as `date + 'T' + time` for
-     `Qualifying`, `Sprint` (sprint weekends only), and the race itself.
+     `Qualifying`, `Sprint` (sprint weekends only), and the race itself across all rounds.
   4. If top-of-hour equals any candidate → POSTs the runner-locked manual trigger
      and notifies the log channel; otherwise no-op.
 
