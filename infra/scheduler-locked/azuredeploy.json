@@ -29,6 +29,13 @@
         "description": "Telegram bot token used to post Logic App failure notifications."
       }
     },
+    "grantCalendarReader": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Set to true for a privileged deployment that provisions the scheduler's container-scoped Blob Data Reader grant."
+      }
+    },
     "calendarStorageAccountName": {
       "type": "string",
       "metadata": {
@@ -431,6 +438,7 @@
     },
     {
       "type": "Microsoft.Authorization/roleAssignments",
+      "condition": "[parameters('grantCalendarReader')]",
       "apiVersion": "2022-04-01",
       "name": "[guid(concat('Microsoft.Storage/storageAccounts/', parameters('calendarStorageAccountName'), '/blobServices/default/containers/f1-fantasy-scraper-json'), resourceId('Microsoft.Logic/workflows', parameters('logicAppName')), '2a2b9908-6ea1-4ae2-8e65-a410df84e7d1')]",
       "scope": "[concat('Microsoft.Storage/storageAccounts/', parameters('calendarStorageAccountName'), '/blobServices/default/containers/f1-fantasy-scraper-json')]",

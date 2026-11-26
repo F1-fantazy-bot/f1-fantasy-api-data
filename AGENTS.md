@@ -437,6 +437,12 @@ files differ:
   capturable. SprintQualifying also doesn't always start on the hour
   (e.g. `20:30:00Z`), which our top-of-hour matcher would miss.
 
+Routine locked-scheduler deployments reuse the existing container-scoped Storage
+Blob Data Reader grant. For a new locked scheduler identity, deploy
+`infra/scheduler-locked/azuredeploy.json` with its parameter file and the extra
+parameter `grantCalendarReader=true`, using an Azure identity that can assign
+roles on the blob container.
+
 Deploy commands:
 
 - `npm run deploy:locked` — full locked stack (ACI + runner + grant + scheduler).
